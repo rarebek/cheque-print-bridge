@@ -281,6 +281,118 @@ class _PrinterScreenState extends State<PrinterScreen> {
     }
   }
 
+  // Add a new method for printing test with two products
+  Future<void> _printTwoProductsTest() async {
+    if (_connectedDeviceId == null) {
+      setState(() {
+        _status = 'Not connected to any printer';
+      });
+      return;
+    }
+
+    setState(() {
+      _isPrinting = true;
+      _status = 'Printing two products test...';
+    });
+
+    try {
+      // Create a receipt with two products
+      final List<Map<String, dynamic>> testProducts = [
+        {
+          "name": "Product with ʻ special char",
+          "quantity": 2.0,
+          "unitName": "dona",
+          "currentPrice": 10000.0,
+          "status": 1
+        },
+        {
+          "name": "This is a long product name that should wrap nicely",
+          "quantity": 1.0,
+          "unitName": "kg",
+          "currentPrice": 25000.0,
+          "status": 1
+        }
+      ];
+
+      // Calculate total
+      double totalAmount = 0.0;
+      for (final product in testProducts) {
+        totalAmount += (product["currentPrice"] as double) * (product["quantity"] as double);
+      }
+
+      // Create payment methods
+      final paymentMethods = [
+        {"methodId": 1, "amount": totalAmount / 2},
+        {"methodId": 2, "amount": totalAmount / 2}
+      ];
+
+      // Show dialog to select transaction type
+      final transactionType = await showDialog<int>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Select Receipt Type'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, 1),
+                child: const Text('Sales Receipt'),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, 2),
+                child: const Text('Purchase Receipt'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (transactionType == null) {
+        setState(() {
+          _isPrinting = false;
+          _status = 'Printing cancelled';
+        });
+        return;
+      }
+
+      // Build receipt data based on transaction type
+      final Map<String, dynamic> receiptData = {
+        "companyName": "TEST COMPANY",
+        "transactionId": "T${DateTime.now().millisecondsSinceEpoch}",
+        "createdAt": DateTime.now().toIso8601String(),
+        "status": 1,
+        "statusName": "",
+        "totalAmount": totalAmount,
+        "finalAmount": totalAmount,
+        "products": testProducts,
+        "paymentMethods": paymentMethods
+      };
+
+      // Add type-specific fields
+      if (transactionType == 1) {
+        // Sale receipt
+        receiptData["seller"] = "Test Seller";
+      } else {
+        // Purchase receipt
+        receiptData["supplierName"] = "Test Supplier";
+        receiptData["receiver"] = "Test Receiver";
+      }
+
+      final bool result = await platform.invokeMethod('printCheque', receiptData);
+
+      setState(() {
+        _status = result ? 'Test receipt printed successfully' : 'Failed to print test receipt';
+        _isPrinting = false;
+      });
+    } on PlatformException catch (e) {
+      setState(() {
+        _status = 'Printing error: ${e.message}';
+        _isPrinting = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -347,22 +459,40 @@ class _PrinterScreenState extends State<PrinterScreen> {
           if (_connectedDeviceId != null)
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isPrinting ? null : _printTestReceipt,
-                      child: Text(
-                        _isPrinting ? 'Printing...' : 'Print Test Receipt',
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _isPrinting ? null : _printTestReceipt,
+                          child: Text(
+                            _isPrinting ? 'Printing...' : 'Print Test Receipt',
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _isPrinting ? null : _printCheque,
+                          child: Text(
+                            _isPrinting ? 'Printing...' : 'Print Cheque',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isPrinting ? null : _printCheque,
+                      onPressed: _isPrinting ? null : _printTwoProductsTest,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
                       child: Text(
-                        _isPrinting ? 'Printing...' : 'Print Cheque',
+                        _isPrinting ? 'Printing...' : 'Test Two Products',
                       ),
                     ),
                   ),
