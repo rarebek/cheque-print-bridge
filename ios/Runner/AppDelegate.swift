@@ -350,10 +350,12 @@ import CoreBluetooth
             // Determine receipt type - purchase or sale based on if we have supplier data
             let isPurchaseReceipt = !supplierName.isEmpty
 
-            // Center the company name - with normal font and proper wrapping
+            // Center the company name - with normal font and condensed wrapping
             commands.append(contentsOf: [0x1B, 0x61, 0x01]) // ESC a 1 - Center align
             let safeCompanyName = sanitizeText(companyName)
-            let wrappedCompanyName = wrapTextWithDash(safeCompanyName, maxLength: pageWidth - 2)
+
+            // Use a wider maxLength to make company name less tall (fewer lines)
+            let wrappedCompanyName = wrapTextWithDash(safeCompanyName, maxLength: min(pageWidth - 2, 20))
 
             for line in wrappedCompanyName {
                 commands.append(contentsOf: line.data(using: .utf8) ?? Data())
@@ -525,13 +527,19 @@ import CoreBluetooth
                 // Product name (bold) - wrap if too long with 8-char limit and dash splitting
                 commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
 
-                // Wrap product name to fit max width of 8 characters
-                let wrappedProductName = wrapTextWithDash(fullProductName)
+                // Wrap product name to fit reasonable width for better formatting
+                let wrappedProductName = wrapTextWithDash(fullProductName, maxLength: min(16, pageWidth - 10))
 
                 // Print first line of product name with quantity and price on the right
                 if let firstLine = wrappedProductName.first {
-                    let firstLinePadding = max(1, pageWidth - firstLine.count - quantityText.count - priceText.count - 2)
-                    let firstRowWithDetails = "\(firstLine)\(String(repeating: " ", count: firstLinePadding))\(quantityText) \(priceText)"
+                    // Ensure price always prints by using minimum padding of 1 and limiting firstLine length if needed
+                    let maxAllowableLengthForFirstLine = pageWidth - quantityText.count - priceText.count - 3
+                    let truncatedFirstLine = firstLine.count > maxAllowableLengthForFirstLine
+                        ? String(firstLine.prefix(maxAllowableLengthForFirstLine))
+                        : firstLine
+
+                    let firstLinePadding = max(1, pageWidth - truncatedFirstLine.count - quantityText.count - priceText.count - 2)
+                    let firstRowWithDetails = "\(truncatedFirstLine)\(String(repeating: " ", count: firstLinePadding))\(quantityText) \(priceText)"
                     commands.append(contentsOf: firstRowWithDetails.data(using: .utf8) ?? Data())
                     commands.append(contentsOf: [0x0A]) // Line feed
 
