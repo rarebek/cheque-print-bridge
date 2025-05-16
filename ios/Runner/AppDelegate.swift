@@ -122,21 +122,21 @@ import CoreBluetooth
         let now = df.string(from: Date())
 
         let cmds = [
-            "SIZE 80 mm, 60 mm",
+            "SIZE 58 mm, 60 mm",
             "GAP 2 mm, 0 mm",
             "CLS",
             "TEXT 10,10,\"TSS24.BF2\",0,1,1,\"STORE NAME\"",
             "TEXT 10,40,\"TSS24.BF2\",0,1,1,\"TEST RECEIPT\"",
             "TEXT 10,70,\"TSS24.BF2\",0,1,1,\"\(now)\"",
-            "BAR 10,100,400,3",
+            "BAR 10,100,300,3",
             "TEXT 10,120,\"TSS24.BF2\",0,1,1,\"Item 1\"",
-            "TEXT 300,120,\"TSS24.BF2\",0,1,1,\"$10.00\"",
+            "TEXT 220,120,\"TSS24.BF2\",0,1,1,\"$10.00\"",
             "TEXT 10,150,\"TSS24.BF2\",0,1,1,\"Item 2\"",
-            "TEXT 300,150,\"TSS24.BF2\",0,1,1,\"$15.00\"",
-            "BAR 10,180,400,3",
+            "TEXT 220,150,\"TSS24.BF2\",0,1,1,\"$15.00\"",
+            "BAR 10,180,300,3",
             "TEXT 10,200,\"TSS24.BF2\",0,1,1,\"TOTAL\"",
-            "TEXT 300,200,\"TSS24.BF2\",0,1,1,\"$25.00\"",
-            "QRCODE 150,240,M,8,A,0,\"https://example.com/receipt/12345\"",
+            "TEXT 220,200,\"TSS24.BF2\",0,1,1,\"$25.00\"",
+            "QRCODE 110,240,M,8,A,0,\"https://example.com/receipt/12345\"",
             "TEXT 10,380,\"TSS24.BF2\",0,1,1,\"Thank you for your purchase!\"",
             "PRINT 1"
         ]
@@ -175,18 +175,18 @@ import CoreBluetooth
         // Build TSPL command buffer for cheque printing
         // Adjust these commands according to your cheque format requirements
         let cmds = [
-            "SIZE 80 mm, 60 mm",
+            "SIZE 58 mm, 60 mm",
             "GAP 2 mm, 0 mm",
             "CLS",
             "TEXT 10,10,\"TSS24.BF2\",0,1,1,\"\(bankName)\"",
-            "TEXT 350,10,\"TSS24.BF2\",0,1,1,\"Date: \(date)\"",
-            "TEXT 350,40,\"TSS24.BF2\",0,1,1,\"Cheque #: \(chequeNumber)\"",
+            "TEXT 250,10,\"TSS24.BF2\",0,1,1,\"Date: \(date)\"",
+            "TEXT 250,40,\"TSS24.BF2\",0,1,1,\"Cheque #: \(chequeNumber)\"",
             "BAR 10,70,400,1",
             "TEXT 10,90,\"TSS24.BF2\",0,1,1,\"Pay to the order of:\"",
             "TEXT 10,120,\"TSS24.BF2\",0,1,1,\"\(payeeName)\"",
             "TEXT 10,150,\"TSS24.BF2\",0,1,1,\"Amount: $\(amount)\"",
             "TEXT 10,180,\"TSS24.BF2\",0,1,1,\"Account: \(accountNumber)\"",
-            "BAR 10,210,400,1",
+            "BAR 10,210,300,1",
             "TEXT 10,230,\"TSS24.BF2\",0,1,1,\"\(additionalInfo)\"",
             "PRINT 1"
         ]
