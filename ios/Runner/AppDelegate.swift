@@ -350,13 +350,17 @@ import CoreBluetooth
             // Determine receipt type - purchase or sale based on if we have supplier data
             let isPurchaseReceipt = !supplierName.isEmpty
 
-            // Center the company name - truly centered with slightly larger font
-            commands.append(contentsOf: [0x1D, 0x21, 0x01]) // GS ! 01 - only slightly larger font (height doubled)
-            let companyPadding = (pageWidth - companyName.count) / 2
-            let centeredCompany = String(repeating: " ", count: max(0, companyPadding)) + sanitizeText(companyName)
-            commands.append(contentsOf: centeredCompany.data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-            commands.append(contentsOf: [0x1D, 0x21, 0x00]) // Reset font size
+            // Center the company name - with normal font and proper wrapping
+            commands.append(contentsOf: [0x1B, 0x61, 0x01]) // ESC a 1 - Center align
+            let safeCompanyName = sanitizeText(companyName)
+            let wrappedCompanyName = wrapTextWithDash(safeCompanyName, maxLength: pageWidth - 2)
+
+            for line in wrappedCompanyName {
+                commands.append(contentsOf: line.data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+            }
+
+            commands.append(contentsOf: [0x1B, 0x61, 0x00]) // Reset alignment to left
 
             // Helper function to wrap text with 8-character limit and dash-based word splitting
             func wrapTextWithDash(_ string: String, maxLength: Int = 8) -> [String] {
@@ -521,31 +525,26 @@ import CoreBluetooth
                 // Product name (bold) - wrap if too long with 8-char limit and dash splitting
                 commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
 
-                // Wrap product name to fit the width with our custom wrapping
+                // Wrap product name to fit max width of 8 characters
                 let wrappedProductName = wrapTextWithDash(fullProductName)
 
-                // Print each line of the product name
-                for line in wrappedProductName {
-                    commands.append(contentsOf: line.data(using: .utf8) ?? Data())
+                // Print first line of product name with quantity and price on the right
+                if let firstLine = wrappedProductName.first {
+                    let firstLinePadding = max(1, pageWidth - firstLine.count - quantityText.count - priceText.count - 2)
+                    let firstRowWithDetails = "\(firstLine)\(String(repeating: " ", count: firstLinePadding))\(quantityText) \(priceText)"
+                    commands.append(contentsOf: firstRowWithDetails.data(using: .utf8) ?? Data())
                     commands.append(contentsOf: [0x0A]) // Line feed
+
+                    // Print remaining lines of product name if any
+                    if wrappedProductName.count > 1 {
+                        for i in 1..<wrappedProductName.count {
+                            commands.append(contentsOf: wrappedProductName[i].data(using: .utf8) ?? Data())
+                            commands.append(contentsOf: [0x0A]) // Line feed
+                        }
+                    }
                 }
 
                 commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
-
-                // Always print quantity and price on separate lines
-
-                // Print quantity centered in its own line
-                commands.append(contentsOf: [0x1B, 0x61, 0x01]) // ESC a 1 - Center alignment
-                commands.append(contentsOf: quantityText.data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x0A]) // Line feed
-
-                // Print price right-aligned
-                commands.append(contentsOf: [0x1B, 0x61, 0x02]) // ESC a 2 - Right alignment
-                commands.append(contentsOf: priceText.data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x0A]) // Line feed
-
-                // Reset alignment to left
-                commands.append(contentsOf: [0x1B, 0x61, 0x00]) // ESC a 0 - Left alignment
 
                 // Add space between products
                 commands.append(contentsOf: [0x0A]) // Empty line after each product
@@ -674,12 +673,16 @@ import CoreBluetooth
 
     // Add a helper function for text encoding to handle special characters
     func sanitizeText(_ text: String) -> String {
-        // Replace problematic characters with similar ASCII alternatives
+        // Replace problematic characters with better alternatives
         return text.replacingOccurrences(of: "ʻ", with: "'")
                    .replacingOccurrences(of: "ʼ", with: "'")
-                   .replacingOccurrences(of: "ҳ", with: "x")
+                   .replacingOccurrences(of: "Oʻ", with: "O'")
+                   .replacingOccurrences(of: "oʻ", with: "o'")
+                   .replacingOccurrences(of: "Gʻ", with: "G'")
+                   .replacingOccurrences(of: "gʻ", with: "g'")
+                   .replacingOccurrences(of: "ҳ", with: "h")
                    .replacingOccurrences(of: "қ", with: "q")
-                   .replacingOccurrences(of: "ғ", with: "g")
+                   .replacingOccurrences(of: "ғ", with: "g'")
                    .replacingOccurrences(of: "ў", with: "u")
     }
 }
