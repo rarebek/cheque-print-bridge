@@ -206,14 +206,45 @@ import CoreBluetooth
             ))
         }
 
-        // Extract cheque details from the received arguments
-        let payeeName = chequeDetails["payeeName"] as? String ?? "Unknown Payee"
-        let amount = chequeDetails["amount"] as? String ?? "0.00"
-        let date = chequeDetails["date"] as? String ?? Date().description
-        let chequeNumber = chequeDetails["chequeNumber"] as? String ?? "00000000"
-        let accountNumber = chequeDetails["accountNumber"] as? String ?? "Unknown Account"
-        let bankName = chequeDetails["bankName"] as? String ?? "Bank"
-        let additionalInfo = chequeDetails["additionalInfo"] as? String ?? ""
+        // Extract all possible fields from the received arguments
+        let companyName = chequeDetails["companyName"] as? String ?? "My Company"
+        let transactionId = chequeDetails["transactionId"] as? String ?? "0000000"
+        let status = chequeDetails["status"] as? Int ?? 1
+        let statusName = chequeDetails["statusName"] as? String ?? ""
+
+        // Persons involved
+        let seller = chequeDetails["seller"] as? String ?? ""
+        let receiver = chequeDetails["receiver"] as? String ?? ""
+        let supplierName = chequeDetails["supplierName"] as? String ?? ""
+
+        // Financial details
+        let totalAmount = chequeDetails["totalAmount"] as? Double ?? 0.0
+        let finalAmount = chequeDetails["finalAmount"] as? Double ?? totalAmount
+
+        // Payment method details
+        let paymentMethods = chequeDetails["paymentMethods"] as? [[String: Any]] ?? []
+
+        // Products list
+        let products = chequeDetails["products"] as? [[String: Any]] ?? []
+
+        // Date details
+        let createdDate = chequeDetails["createdAt"] as? String ?? Date().description
+
+        // Format the date for display
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        let date: Date
+        if let parsedDate = dateFormatter.date(from: createdDate) {
+            date = parsedDate
+        } else {
+            date = Date()
+        }
+
+        dateFormatter.dateFormat = "dd-MM-yyyy"
+        let formattedDate = dateFormatter.string(from: date)
+
+        dateFormatter.dateFormat = "HH:mm"
+        let formattedTime = dateFormatter.string(from: date)
 
         // ESC/POS commands for 58mm paper
         var commands: [UInt8] = []
@@ -224,43 +255,143 @@ import CoreBluetooth
         // Set text alignment center (ESC a 1)
         commands.append(contentsOf: [0x1B, 0x61, 0x01])
 
-        // Bank name (bold)
+        // Company name (bold)
         commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: bankName.data(using: .utf8) ?? Data())
+        commands.append(contentsOf: companyName.data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
         // Set text alignment left (ESC a 0)
         commands.append(contentsOf: [0x1B, 0x61, 0x00])
 
-        // Date and cheque number
-        commands.append(contentsOf: "Date: \(date)".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
-        commands.append(contentsOf: "Cheque #: \(chequeNumber)".data(using: .utf8) ?? Data())
+        // Date and time
+        commands.append(contentsOf: "Sana: \(formattedDate)  Vaqti: \(formattedTime)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
-        // Horizontal line (using dash characters)
+        // Transaction ID
+        commands.append(contentsOf: "Chek raqami: \(transactionId)".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Status (if not 1)
+        if status != 1 && !statusName.isEmpty {
+            commands.append(contentsOf: "Holati: \(statusName)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
+
+        // Personnel information - different based on transaction type
+        if !seller.isEmpty {
+            commands.append(contentsOf: "Kassir: \(seller)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
+
+        if !supplierName.isEmpty {
+            commands.append(contentsOf: "Ta'minotchi: \(supplierName)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
+
+        if !receiver.isEmpty {
+            commands.append(contentsOf: "Qabul qiluvchi: \(receiver)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
+
+        // Horizontal line
         commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
         commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Pay to the order of section
-        commands.append(contentsOf: "Pay to the order of:".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
+        // Products
+        for product in products {
+            let name = product["name"] as? String ?? "Unknown Product"
+            let quantity = product["quantity"] as? Double ?? 0.0
+            let unitName = product["unitName"] as? String ?? "pcs"
+            let price = product["currentPrice"] as? Double ?? 0.0
+            let productStatus = product["status"] as? Int ?? 1
 
-        // Payee name (bold)
+            let statusLabel = productStatus == 1 ? "" : "(Qaytarilgan)"
+            let total = price * quantity
+
+            // Product name (bold) with status if returned
+            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+            commands.append(contentsOf: "\(name) \(statusLabel)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+            // Quantity and unit
+            commands.append(contentsOf: "(\(quantity) \(unitName))".data(using: .utf8) ?? Data())
+
+            // Format price to show commas for thousands
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.groupingSeparator = " "
+            let formattedPrice = formatter.string(from: NSNumber(value: total)) ?? "\(total)"
+
+            // Tab over to display price at right
+            commands.append(contentsOf: "    \(formattedPrice) so'm".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
+
+        // Horizontal line
         commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: payeeName.data(using: .utf8) ?? Data())
+        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Amount
-        commands.append(contentsOf: "Amount: $\(amount)".data(using: .utf8) ?? Data())
+        // Format total amount
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = " "
+        let formattedTotal = formatter.string(from: NSNumber(value: finalAmount)) ?? "\(finalAmount)"
+
+        // Total amount
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "Umumiy summa:".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+        // Tab to position price at right
+        commands.append(contentsOf: "    \(formattedTotal) so'm".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
-        // Account number
-        commands.append(contentsOf: "Account: \(accountNumber)".data(using: .utf8) ?? Data())
+        // Tax (15%)
+        let tax = finalAmount * 0.15
+        let formattedTax = formatter.string(from: NSNumber(value: tax)) ?? "\(tax)"
+
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "QQS 15%:".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+        // Tab to position price at right
+        commands.append(contentsOf: "    \(formattedTax) so'm".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Payment methods section
+        if !paymentMethods.isEmpty {
+            // Horizontal line
+            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+            commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+            commands.append(contentsOf: "To'lov turi:".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+            for method in paymentMethods {
+                let methodId = method["methodId"] as? Int ?? 0
+                let amount = method["amount"] as? Double ?? 0.0
+                let methodName = methodId == 1 ? "Naqd" : "Plastik"
+                let formattedAmount = formatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
+
+                commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+                commands.append(contentsOf: methodName.data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+                // Tab to position price at right
+                commands.append(contentsOf: "    \(formattedAmount) so'm".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+            }
+        }
+
+        // Change amount (always 0 in the example)
+        commands.append(contentsOf: "Qaytim: 0 so'm".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
         // Horizontal line
@@ -269,11 +400,12 @@ import CoreBluetooth
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Additional info
-        if !additionalInfo.isEmpty {
-            commands.append(contentsOf: additionalInfo.data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-        }
+        // Thank you message - center aligned
+        commands.append(contentsOf: [0x1B, 0x61, 0x01]) // Center align
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "Xaridingiz uchun rahmat!".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
         // Feed and cut
         commands.append(contentsOf: [0x0A, 0x0A, 0x0A, 0x0A]) // Feed lines
