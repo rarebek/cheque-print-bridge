@@ -260,13 +260,36 @@ import CoreBluetooth
         // Calculate the printable width (for 58mm thermal paper it's usually around 32-34 characters)
         let pageWidth = 32
 
-        // Center the company name precisely
-        commands.append(contentsOf: [0x1B, 0x61, 0x01]) // Center align
-        commands.append(contentsOf: companyName.data(using: .utf8) ?? Data())
+        // Determine receipt type - purchase or sale based on if we have supplier data
+        let isPurchaseReceipt = !supplierName.isEmpty
+
+        // Center the company name - truly centered
+        let companyPadding = (pageWidth - companyName.count) / 2
+        let centeredCompany = String(repeating: " ", count: max(0, companyPadding)) + companyName
+        commands.append(contentsOf: centeredCompany.data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
-        // Set text alignment left (ESC a 0)
-        commands.append(contentsOf: [0x1B, 0x61, 0x00])
+        // Helper function to truncate strings that are too long
+        func truncateString(_ string: String, maxLength: Int) -> String {
+            if string.count > maxLength {
+                let index = string.index(string.startIndex, offsetBy: maxLength)
+                return String(string[..<index])
+            }
+            return string
+        }
+
+        // Helper function to right-align values with truncation
+        func appendLabelWithRightAlignedValue(label: String, value: String) {
+            let maxLabelWidth = 13 // Adjust to fit your receipt width
+            let maxValueWidth = pageWidth - maxLabelWidth - 1
+
+            let truncatedLabel = truncateString(label, maxLength: maxLabelWidth)
+            let truncatedValue = truncateString(value, maxLength: maxValueWidth)
+
+            let padding = String(repeating: " ", count: max(1, pageWidth - truncatedLabel.count - truncatedValue.count))
+            commands.append(contentsOf: "\(truncatedLabel)\(padding)\(truncatedValue)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
 
         // Date and time (left and right aligned)
         let dateText = "Sana:\(formattedDate)"
@@ -275,54 +298,28 @@ import CoreBluetooth
         commands.append(contentsOf: "\(dateText)\(spacePadding)\(timeText)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
-        // Transaction ID with right alignment - handle long IDs
+        // Transaction ID with right alignment - truncated if needed
         let transactionIdLabel = "Chek raqami: "
-        let transactionIdValue = "\(transactionId)" // Removed № symbol
-
-        if transactionIdLabel.count + transactionIdValue.count > pageWidth {
-            // If too long, print label first
-            commands.append(contentsOf: transactionIdLabel.data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-
-            // Then right-align the value on the next line
-            let valuePadding = String(repeating: " ", count: max(1, pageWidth - transactionIdValue.count))
-            commands.append(contentsOf: "\(valuePadding)\(transactionIdValue)".data(using: .utf8) ?? Data())
-        } else {
-            // If it fits, print normally with padding
-            let transIdPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - transactionIdValue.count))
-            commands.append(contentsOf: "\(transactionIdLabel)\(transIdPadding)\(transactionIdValue)".data(using: .utf8) ?? Data())
-        }
+        let truncatedId = truncateString(transactionId, maxLength: pageWidth - transactionIdLabel.count - 1)
+        let transIdPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - truncatedId.count))
+        commands.append(contentsOf: "\(transactionIdLabel)\(transIdPadding)\(truncatedId)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
-        // Personnel information based on transaction type - with right alignment
-        // Handle long names with proper alignment
-        func appendLabelWithRightAlignedValue(label: String, value: String) {
-            if label.count + value.count > pageWidth {
-                // If too long, print label first
-                commands.append(contentsOf: label.data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x0A]) // Line feed
-
-                // Then right-align the value on the next line
-                let valuePadding = String(repeating: " ", count: max(1, pageWidth - value.count))
-                commands.append(contentsOf: "\(valuePadding)\(value)".data(using: .utf8) ?? Data())
-            } else {
-                // If it fits, print normally with padding
-                let padding = String(repeating: " ", count: max(1, pageWidth - label.count - value.count))
-                commands.append(contentsOf: "\(label)\(padding)\(value)".data(using: .utf8) ?? Data())
+        // Personnel information based on receipt type
+        if isPurchaseReceipt {
+            // Purchase receipt: supplier and receiver
+            if !supplierName.isEmpty {
+                appendLabelWithRightAlignedValue(label: "Ta'minotchi:", value: supplierName)
             }
-            commands.append(contentsOf: [0x0A]) // Line feed
-        }
 
-        if !seller.isEmpty {
-            appendLabelWithRightAlignedValue(label: "Kassir:", value: seller)
-        }
-
-        if !supplierName.isEmpty {
-            appendLabelWithRightAlignedValue(label: "Ta'minotchi:", value: supplierName)
-        }
-
-        if !receiver.isEmpty {
-            appendLabelWithRightAlignedValue(label: "Qabul qiluvchi:", value: receiver)
+            if !receiver.isEmpty {
+                appendLabelWithRightAlignedValue(label: "Qabul qiluvchi:", value: receiver)
+            }
+        } else {
+            // Sales receipt: cashier
+            if !seller.isEmpty {
+                appendLabelWithRightAlignedValue(label: "Kassir:", value: seller)
+            }
         }
 
         // Status (if not 1)
@@ -337,7 +334,7 @@ import CoreBluetooth
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Products - 3 column layout with Excel-like alignment
+        // Products - with quantity centered
         for product in products {
             let name = product["name"] as? String ?? "Unknown Product"
             let quantity = product["quantity"] as? Double ?? 0.0
@@ -353,41 +350,26 @@ import CoreBluetooth
             let priceText = "\(formattedPrice) so'm"
             let quantityText = "(\(quantity) \(unitName))"
 
-            // Product name (bold) with status if returned
+            // Product name (bold) - truncate if too long
             commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-
             let fullProductName = "\(name) \(statusLabel)"
+            let truncatedName = truncateString(fullProductName, maxLength: pageWidth)
+            commands.append(contentsOf: truncatedName.data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-            // If product name is too long, need to handle differently
-            if fullProductName.count > pageWidth - quantityText.count - priceText.count - 2 {
-                // Print product name first
-                commands.append(contentsOf: fullProductName.data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x0A]) // Line feed
-                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+            // Calculate column widths for 3-column layout
+            let priceColWidth = min(priceText.count + 1, pageWidth / 3)
+            let quantityColWidth = min(quantityText.count, pageWidth / 3)
+            let leftColWidth = pageWidth - priceColWidth - quantityColWidth
 
-                // Then print quantity and price on next line, with quantity on left and price on right
-                let pricePadding = String(repeating: " ", count: max(1, pageWidth - quantityText.count - priceText.count))
-                commands.append(contentsOf: "\(quantityText)\(pricePadding)\(priceText)".data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x0A]) // Line feed
-            } else {
-                // Short name - print all on one line
-                // Calculate spacing for three columns
-                let col1End = min(pageWidth / 2, fullProductName.count)
-                let col1Text = String(fullProductName.prefix(col1End))
+            // Create the spacing to center the quantity
+            let leftPadding = String(repeating: " ", count: leftColWidth)
+            let rightPadding = String(repeating: " ", count: max(1, pageWidth - leftColWidth - quantityText.count - priceText.count))
 
-                let col1Padding = String(repeating: " ", count: max(1, pageWidth / 2 - col1Text.count))
-
-                // First half - product name
-                commands.append(contentsOf: col1Text.data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
-                commands.append(contentsOf: col1Padding.data(using: .utf8) ?? Data())
-
-                // Second half - quantity and price
-                let halfWidth = pageWidth / 2
-                let quantityPadding = String(repeating: " ", count: max(1, halfWidth - quantityText.count - priceText.count))
-                commands.append(contentsOf: "\(quantityText)\(quantityPadding)\(priceText)".data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x0A]) // Line feed
-            }
+            // Print quantity centered and price right-aligned
+            commands.append(contentsOf: "\(leftPadding)\(quantityText)\(rightPadding)\(priceText)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
         }
 
         // Horizontal line
@@ -402,7 +384,6 @@ import CoreBluetooth
         let totalPadding = String(repeating: " ", count: max(1, pageWidth - totalLabel.count - totalValue.count))
         commands.append(contentsOf: "\(totalLabel)\(totalPadding)\(totalValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
         // Tax (15%)
         let tax = finalAmount * 0.15
@@ -412,9 +393,10 @@ import CoreBluetooth
         let taxPadding = String(repeating: " ", count: max(1, pageWidth - taxLabel.count - taxValue.count))
         commands.append(contentsOf: "\(taxLabel)\(taxPadding)\(taxValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Payment methods section
-        if !paymentMethods.isEmpty {
+        // Payment methods section (only for sales receipts)
+        if !isPurchaseReceipt && !paymentMethods.isEmpty {
             // Horizontal line
             commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
             commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
@@ -453,16 +435,17 @@ import CoreBluetooth
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Thank you message - center aligned (truly centered)
-        let thankYouMsg = "Xaridingiz uchun rahmat!"
-
-        // Force center alignment with exact character counting
-        let leftPadding = (pageWidth - thankYouMsg.count) / 2
-        let rightPadding = pageWidth - thankYouMsg.count - leftPadding
-        let paddedThankYou = String(repeating: " ", count: leftPadding) + thankYouMsg + String(repeating: " ", count: rightPadding)
-
-        commands.append(contentsOf: paddedThankYou.data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
+        // Thank you message - only for sales receipts
+        if !isPurchaseReceipt {
+            // Thank you message - truly centered
+            let thankYouMsg = "Xaridingiz uchun rahmat!"
+            // Force center alignment with exact character counting
+            let leftPadding = (pageWidth - thankYouMsg.count) / 2
+            let rightPadding = pageWidth - thankYouMsg.count - leftPadding
+            let paddedThankYou = String(repeating: " ", count: leftPadding) + thankYouMsg + String(repeating: " ", count: rightPadding)
+            commands.append(contentsOf: paddedThankYou.data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
 
         // Feed and cut
         commands.append(contentsOf: [0x0A, 0x0A, 0x0A, 0x0A]) // Feed lines
