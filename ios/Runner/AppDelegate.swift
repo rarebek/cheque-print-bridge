@@ -116,41 +116,84 @@ import CoreBluetooth
             ))
         }
 
-        // Build TSPL command buffer
+        // Create date/time string
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let now = df.string(from: Date())
 
-        let cmds = [
-            "SIZE 58 mm, 60 mm",
-            "GAP 2 mm, 0 mm",
-            "CLS",
-            "TEXT 10,10,\"TSS24.BF2\",0,1,1,\"STORE NAME\"",
-            "TEXT 10,40,\"TSS24.BF2\",0,1,1,\"TEST RECEIPT\"",
-            "TEXT 10,70,\"TSS24.BF2\",0,1,1,\"\(now)\"",
-            "BAR 10,100,300,3",
-            "TEXT 10,120,\"TSS24.BF2\",0,1,1,\"Item 1\"",
-            "TEXT 220,120,\"TSS24.BF2\",0,1,1,\"$10.00\"",
-            "TEXT 10,150,\"TSS24.BF2\",0,1,1,\"Item 2\"",
-            "TEXT 220,150,\"TSS24.BF2\",0,1,1,\"$15.00\"",
-            "BAR 10,180,300,3",
-            "TEXT 10,200,\"TSS24.BF2\",0,1,1,\"TOTAL\"",
-            "TEXT 220,200,\"TSS24.BF2\",0,1,1,\"$25.00\"",
-            "QRCODE 110,240,M,8,A,0,\"https://example.com/receipt/12345\"",
-            "TEXT 10,380,\"TSS24.BF2\",0,1,1,\"Thank you for your purchase!\"",
-            "PRINT 1"
-        ]
-        let payload = cmds.joined(separator: "\r\n") + "\r\n"
-        guard let data = payload.data(using: .utf8) else {
-            return result(FlutterError(
-                code: "ENCODING_ERROR",
-                message: "Failed to encode commands",
-                details: nil
-            ))
-        }
+        // ESC/POS commands for 58mm paper
+        var commands: [UInt8] = []
 
-        // 🔑 Use the renamed API:
-        bleManager.writeCommand(with: data)
+        // Initialize printer (ESC @)
+        commands.append(contentsOf: [0x1B, 0x40])
+
+        // Set text alignment center (ESC a 1)
+        commands.append(contentsOf: [0x1B, 0x61, 0x01])
+
+        // Store name (bold)
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "STORE NAME".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Receipt title
+        commands.append(contentsOf: "TEST RECEIPT".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Date time
+        commands.append(contentsOf: now.data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Set text alignment left (ESC a 0)
+        commands.append(contentsOf: [0x1B, 0x61, 0x00])
+
+        // Horizontal line (using dash characters)
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Item 1
+        commands.append(contentsOf: "Item 1".data(using: .utf8) ?? Data())
+        // Tab to position price at right (9 spaces)
+        commands.append(contentsOf: "         $10.00".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Item 2
+        commands.append(contentsOf: "Item 2".data(using: .utf8) ?? Data())
+        // Tab to position price at right (9 spaces)
+        commands.append(contentsOf: "         $15.00".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Horizontal line (using dash characters)
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Total (bold)
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "TOTAL".data(using: .utf8) ?? Data())
+        // Tab to position price at right (10 spaces)
+        commands.append(contentsOf: "          $25.00".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Set text alignment center (ESC a 1)
+        commands.append(contentsOf: [0x1B, 0x61, 0x01])
+
+        // Thank you message
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: "Thank you for your purchase!".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Feed and cut
+        commands.append(contentsOf: [0x0A, 0x0A, 0x0A, 0x0A]) // Feed lines
+        commands.append(contentsOf: [0x1D, 0x56, 0x01]) // Cut paper (partial cut)
+
+        // Send the commands to the printer
+        let commandData = Data(commands)
+        bleManager.writeCommand(with: commandData)
         result(true)
     }
 
@@ -172,36 +215,73 @@ import CoreBluetooth
         let bankName = chequeDetails["bankName"] as? String ?? "Bank"
         let additionalInfo = chequeDetails["additionalInfo"] as? String ?? ""
 
-        // Build TSPL command buffer for cheque printing
-        // Adjust these commands according to your cheque format requirements
-        let cmds = [
-            "SIZE 58 mm, 60 mm",
-            "GAP 2 mm, 0 mm",
-            "CLS",
-            "TEXT 10,10,\"TSS24.BF2\",0,1,1,\"\(bankName)\"",
-            "TEXT 250,10,\"TSS24.BF2\",0,1,1,\"Date: \(date)\"",
-            "TEXT 250,40,\"TSS24.BF2\",0,1,1,\"Cheque #: \(chequeNumber)\"",
-            "BAR 10,70,400,1",
-            "TEXT 10,90,\"TSS24.BF2\",0,1,1,\"Pay to the order of:\"",
-            "TEXT 10,120,\"TSS24.BF2\",0,1,1,\"\(payeeName)\"",
-            "TEXT 10,150,\"TSS24.BF2\",0,1,1,\"Amount: $\(amount)\"",
-            "TEXT 10,180,\"TSS24.BF2\",0,1,1,\"Account: \(accountNumber)\"",
-            "BAR 10,210,300,1",
-            "TEXT 10,230,\"TSS24.BF2\",0,1,1,\"\(additionalInfo)\"",
-            "PRINT 1"
-        ]
+        // ESC/POS commands for 58mm paper
+        var commands: [UInt8] = []
 
-        let payload = cmds.joined(separator: "\r\n") + "\r\n"
-        guard let data = payload.data(using: .utf8) else {
-            return result(FlutterError(
-                code: "ENCODING_ERROR",
-                message: "Failed to encode commands",
-                details: nil
-            ))
+        // Initialize printer (ESC @)
+        commands.append(contentsOf: [0x1B, 0x40])
+
+        // Set text alignment center (ESC a 1)
+        commands.append(contentsOf: [0x1B, 0x61, 0x01])
+
+        // Bank name (bold)
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: bankName.data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Set text alignment left (ESC a 0)
+        commands.append(contentsOf: [0x1B, 0x61, 0x00])
+
+        // Date and cheque number
+        commands.append(contentsOf: "Date: \(date)".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: "Cheque #: \(chequeNumber)".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Horizontal line (using dash characters)
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Pay to the order of section
+        commands.append(contentsOf: "Pay to the order of:".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Payee name (bold)
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: payeeName.data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Amount
+        commands.append(contentsOf: "Amount: $\(amount)".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Account number
+        commands.append(contentsOf: "Account: \(accountNumber)".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Horizontal line
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+        // Additional info
+        if !additionalInfo.isEmpty {
+            commands.append(contentsOf: additionalInfo.data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
         }
 
-        // Use the renamed API to send data to printer
-        bleManager.writeCommand(with: data)
+        // Feed and cut
+        commands.append(contentsOf: [0x0A, 0x0A, 0x0A, 0x0A]) // Feed lines
+        commands.append(contentsOf: [0x1D, 0x56, 0x01]) // Cut paper (partial cut)
+
+        // Send the commands to the printer
+        let commandData = Data(commands)
+        bleManager.writeCommand(with: commandData)
         result(true)
     }
 
