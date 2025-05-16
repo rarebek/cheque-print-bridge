@@ -390,3 +390,79 @@ Future<void> printPurchaseInfo(PurchaseTransaction transaction)async{
   // Disconnect from the printer
   await PrintBluetoothThermal.disconnect;
 }
+
+Future<void> testPrinting() async {
+  // Create test data for sale receipt
+  final saleTransaction = SaleHistoryTransaction(
+    transactionId: "123456",
+    companyName: "TEST COMPANY NAME",
+    createdAt: DateTime.now().toIso8601String(),
+    seller: "Test Seller",
+    status: 1,
+    statusName: "",
+    finalAmount: 45000,
+    products: [
+      // Product with special character ʻ to test encoding
+      SaleProduct(
+        name: "Product with ʻ special char",
+        quantity: 2,
+        unitName: "dona",
+        currentPrice: 10000,
+        status: 1
+      ),
+      // Product with long name to test wrapping
+      SaleProduct(
+        name: "This is a very long product name that should be wrapped to multiple lines on the receipt",
+        quantity: 1,
+        unitName: "kg",
+        currentPrice: 25000,
+        status: 1
+      ),
+    ],
+    paymentMethods: [
+      PaymentMethod(methodId: 1, amount: 25000),
+      PaymentMethod(methodId: 2, amount: 20000),
+    ],
+  );
+
+  // Create test data for purchase receipt
+  final purchaseTransaction = PurchaseTransaction(
+    transactionId: "P123456",
+    companyName: "TEST COMPANY NAME",
+    createdAt: DateTime.now().toIso8601String(),
+    supplier: Supplier(name: "Test Supplier"),
+    receiver: Receiver(name: "Test Receiver"),
+    status: 1,
+    statusName: "",
+    totalAmount: 45000,
+    products: [
+      // Product with special character ʻ to test encoding
+      PurchaseProduct(
+        name: "Purchase item with ʻ special char",
+        quantity: 2,
+        unitName: "dona",
+        currentPrice: 10000,
+        status: 1
+      ),
+      // Product with long name to test wrapping
+      PurchaseProduct(
+        name: "This is a very long product name that should be wrapped to multiple lines on the receipt for purchase",
+        quantity: 1,
+        unitName: "kg",
+        currentPrice: 25000,
+        status: 1
+      ),
+    ],
+  );
+
+  // Test sale receipt
+  print("Printing sale receipt...");
+  await printSaleReceipt58mm(saleTransaction: saleTransaction);
+
+  // Wait a bit between prints
+  await Future.delayed(const Duration(seconds: 3));
+
+  // Test purchase receipt
+  print("Printing purchase receipt...");
+  await printSaleReceipt58mm(purchaseTransaction: purchaseTransaction);
+}

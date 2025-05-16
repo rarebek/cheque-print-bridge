@@ -226,6 +226,9 @@ import CoreBluetooth
         // Initialize printer (ESC @)
         commands.append(contentsOf: [0x1B, 0x40])
 
+        // Set character encoding to handle special characters correctly
+        commands.append(contentsOf: [0x1B, 0x74, 0x02]) // ESC t 2 - Set character code table to PC437 (most compatible)
+
         if !receiptElements.isEmpty {
             // Use the explicitly provided template from Flutter
             for element in receiptElements {
@@ -347,11 +350,13 @@ import CoreBluetooth
             // Determine receipt type - purchase or sale based on if we have supplier data
             let isPurchaseReceipt = !supplierName.isEmpty
 
-            // Center the company name - truly centered
-            let companyPadding = (pageWidth - companyName.count) / 2
-            let centeredCompany = String(repeating: " ", count: max(0, companyPadding)) + companyName
+            // Center the company name - truly centered with larger font
+            commands.append(contentsOf: [0x1D, 0x21, 0x11]) // GS ! 17 - Double height and width
+            let companyPadding = (pageWidth/2 - companyName.count) / 2
+            let centeredCompany = String(repeating: " ", count: max(0, companyPadding)) + sanitizeText(companyName)
             commands.append(contentsOf: centeredCompany.data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
+            commands.append(contentsOf: [0x1D, 0x21, 0x00]) // Reset font size
 
             // Helper function to wrap strings that are too long
             func wrapText(_ string: String, maxLength: Int) -> [String] {
@@ -400,7 +405,7 @@ import CoreBluetooth
                 let maxValueWidth = pageWidth - maxLabelWidth - 1
 
                 // Wrap the value if needed
-                let wrappedValues = wrapText(value, maxLength: maxValueWidth)
+                let wrappedValues = wrapText(sanitizeText(value), maxLength: maxValueWidth)
 
                 // First line includes the label
                 if let firstLine = wrappedValues.first {
@@ -429,7 +434,7 @@ import CoreBluetooth
 
             // Transaction ID with right alignment - wrapped if needed
             let transactionIdLabel = "Chek raqami: "
-            let wrappedIds = wrapText(transactionId, maxLength: pageWidth - transactionIdLabel.count - 1)
+            let wrappedIds = wrapText(sanitizeText(transactionId), maxLength: pageWidth - transactionIdLabel.count - 1)
 
             if let firstLine = wrappedIds.first {
                 let idPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - firstLine.count))
@@ -476,7 +481,7 @@ import CoreBluetooth
             commands.append(contentsOf: [0x0A]) // Line feed
             commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-            // Products - with quantity centered
+            // Products - with improved column layout and wrapping for product names
             for product in products {
                 let name = product["name"] as? String ?? "Unknown Product"
                 let quantity = product["quantity"] as? Double ?? 0.0
@@ -492,10 +497,15 @@ import CoreBluetooth
                 let priceText = "\(formattedPrice) so'm"
                 let quantityText = "(\(quantity) \(unitName))"
 
+                // Calculate maximum name length based on paper width
+                let maxNameLength = pageWidth - 2 // Leave some margin
+                let fullProductName = sanitizeText("\(name) \(statusLabel)")
+
                 // Product name (bold) - wrap if too long
                 commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-                let fullProductName = "\(name) \(statusLabel)"
-                let wrappedProductName = wrapText(fullProductName, maxLength: pageWidth)
+
+                // Wrap product name to fit the width
+                let wrappedProductName = wrapText(fullProductName, maxLength: maxNameLength)
 
                 for line in wrappedProductName {
                     commands.append(contentsOf: line.data(using: .utf8) ?? Data())
@@ -503,18 +513,19 @@ import CoreBluetooth
                 }
                 commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-                // Calculate column widths for 3-column layout
-                let priceColWidth = min(priceText.count + 1, pageWidth / 3)
-                let quantityColWidth = min(quantityText.count, pageWidth / 3)
-                let leftColWidth = pageWidth - priceColWidth - quantityColWidth
+                // For quantity and price, use a 2-column layout
+                let quantityWidth = quantityText.count
+                let priceWidth = priceText.count
+                let spaceBetween = max(1, pageWidth - quantityWidth - priceWidth)
 
-                // Create the spacing to center the quantity
-                let leftPadding = String(repeating: " ", count: leftColWidth)
-                let rightPadding = String(repeating: " ", count: max(1, pageWidth - leftColWidth - quantityText.count - priceText.count))
+                // Ensure there's enough space for both columns
+                let quantityColumn = quantityText
+                let priceColumn = priceText
+                let layoutLine = "\(quantityColumn)\(String(repeating: " ", count: spaceBetween))\(priceColumn)"
 
-                // Print quantity centered and price right-aligned
-                commands.append(contentsOf: "\(leftPadding)\(quantityText)\(rightPadding)\(priceText)".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: layoutLine.data(using: .utf8) ?? Data())
                 commands.append(contentsOf: [0x0A]) // Line feed
+                commands.append(contentsOf: [0x0A]) // Empty line after each product
             }
 
             // Horizontal line
@@ -580,16 +591,17 @@ import CoreBluetooth
             commands.append(contentsOf: [0x0A]) // Line feed
             commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-            // Thank you message - only for sales receipts
+            // Thank you message - properly centered with larger font
             if !isPurchaseReceipt {
-                // Thank you message - truly centered
-                let thankYouMsg = "Xaridingiz uchun rahmat!"
-                // Force center alignment with exact character counting
+                // Thank you message - truly centered with larger font
+                commands.append(contentsOf: [0x1D, 0x21, 0x01]) // GS ! 01 - Slightly larger font (just height doubled)
+                let thankYouMsg = sanitizeText("Xaridingiz uchun rahmat!")
                 let leftPadding = (pageWidth - thankYouMsg.count) / 2
                 let rightPadding = pageWidth - thankYouMsg.count - leftPadding
                 let paddedThankYou = String(repeating: " ", count: leftPadding) + thankYouMsg + String(repeating: " ", count: rightPadding)
                 commands.append(contentsOf: paddedThankYou.data(using: .utf8) ?? Data())
                 commands.append(contentsOf: [0x0A]) // Line feed
+                commands.append(contentsOf: [0x1D, 0x21, 0x00]) // Reset font size
             }
         }
 
@@ -635,5 +647,16 @@ import CoreBluetooth
 
     func tsCbleDisconnectPeripheral(_ peripheral: CBPeripheral?, error: Error?) {
         printerConnected = false
+    }
+
+    // Add a helper function for text encoding to handle special characters
+    func sanitizeText(_ text: String) -> String {
+        // Replace problematic characters with similar ASCII alternatives
+        return text.replacingOccurrences(of: "ʻ", with: "'")
+                   .replacingOccurrences(of: "ʼ", with: "'")
+                   .replacingOccurrences(of: "ҳ", with: "x")
+                   .replacingOccurrences(of: "қ", with: "q")
+                   .replacingOccurrences(of: "ғ", with: "g")
+                   .replacingOccurrences(of: "ў", with: "u")
     }
 }
