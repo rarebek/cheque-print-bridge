@@ -227,21 +227,18 @@ class ChequeFormatter {
     commands.add(0x0A); // Line feed
     commands.addAll([0x1B, 0x45, 0x00]); // Bold off
 
-    // Define column widths for products section
-    final nameColWidth = (pageWidth * 0.5).toInt(); // 50% for name
-    final qtyColWidth = (pageWidth * 0.25).toInt(); // 25% for quantity
-    final priceColWidth = pageWidth - nameColWidth - qtyColWidth; // remaining space for price
+    // Define column widths for 2-column layout
+    final nameColWidth = (pageWidth * 0.65).toInt(); // 65% for name+quantity
+    final priceColWidth = pageWidth - nameColWidth; // rest for price
 
     // Add column headers for products
     commands.addAll([0x1B, 0x45, 0x01]); // Bold on
     final nameHeader = 'Mahsulot';
-    final qtyHeader = 'Miqdori';
     final priceHeader = 'Narxi';
 
     final paddedNameHeader = nameHeader + ' ' * (nameColWidth - nameHeader.length);
-    final paddedQtyHeader = qtyHeader + ' ' * (qtyColWidth - qtyHeader.length);
 
-    final headerLine = '$paddedNameHeader$paddedQtyHeader$priceHeader';
+    final headerLine = '$paddedNameHeader$priceHeader';
     commands.addAll(utf8.encode(headerLine));
     commands.add(0x0A); // Line feed
     commands.addAll([0x1B, 0x45, 0x00]); // Bold off
@@ -250,7 +247,7 @@ class ChequeFormatter {
     commands.addAll(utf8.encode('-' * pageWidth));
     commands.add(0x0A); // Line feed
 
-    // Products - in 3-column layout
+    // Products - in 2-column layout
     for (var product in products) {
       final name = product['name'] as String? ?? 'Unknown Product';
       final quantity = product['quantity'] as double? ?? 0.0;
@@ -266,14 +263,13 @@ class ChequeFormatter {
       final priceText = '$formattedPrice so\'m';
       final quantityText = '($quantity $unitName)';
 
-      // Calculate maximum name length based on paper width
-      final maxNameLength = pageWidth - 2; // Leave some margin
-      final fullProductName = _sanitizeText('$name $statusLabel');
+      // Include quantity and unit in product name
+      final fullProductName = _sanitizeText('$name $quantityText $statusLabel');
 
       // Wrap product name to fit in first column
       final wrappedProductName = _wrapTextWithDash(fullProductName, maxLength: nameColWidth - 1);
 
-      // First line with all three columns
+      // First line with both columns
       if (wrappedProductName.isNotEmpty) {
         final firstLine = wrappedProductName[0];
         // Ensure name doesn't overflow its column
@@ -283,10 +279,9 @@ class ChequeFormatter {
 
         // Create padded columns
         final paddedName = displayName + ' ' * (nameColWidth - displayName.length);
-        final paddedQty = quantityText + ' ' * (qtyColWidth - quantityText.length);
 
-        // Combine all columns
-        final fullLine = '$paddedName$paddedQty$priceText';
+        // Combine both columns
+        final fullLine = '$paddedName$priceText';
         commands.addAll(utf8.encode(fullLine));
         commands.add(0x0A); // Line feed
 
@@ -297,7 +292,10 @@ class ChequeFormatter {
             final displayLine = line.length > nameColWidth - 1
                 ? line.substring(0, nameColWidth - 1)
                 : line;
-            commands.addAll(utf8.encode(displayLine));
+
+            // Pad the remaining lines to align with the first column
+            final paddedLine = displayLine + ' ' * (nameColWidth - displayLine.length);
+            commands.addAll(utf8.encode(paddedLine));
             commands.add(0x0A); // Line feed
           }
         }

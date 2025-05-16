@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'cheque_formatter.dart';
+import 'lib/cheque_formatter.dart';
 import 'cheque_designer.dart';
 
 void main() {
