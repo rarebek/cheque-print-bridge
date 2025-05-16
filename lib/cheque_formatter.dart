@@ -156,8 +156,9 @@ class ChequeFormatter {
     // Determine receipt type - purchase or sale based on if we have supplier data
     final isPurchaseReceipt = supplierName.isNotEmpty;
 
-    // Center the company name - with normal font and condensed wrapping
+    // Center and bold the company name
     commands.addAll([0x1B, 0x61, 0x01]); // ESC a 1 - Center align
+    commands.addAll([0x1B, 0x45, 0x01]); // Bold on
     final safeCompanyName = _sanitizeText(companyName);
 
     // Use standard width for company name to reduce height while maintaining readability
@@ -167,7 +168,7 @@ class ChequeFormatter {
       commands.addAll(utf8.encode(line));
       commands.add(0x0A); // Line feed
     }
-
+    commands.addAll([0x1B, 0x45, 0x00]); // Bold off
     commands.addAll([0x1B, 0x61, 0x00]); // Reset alignment to left
 
     // Date and time (left and right aligned)
@@ -231,19 +232,7 @@ class ChequeFormatter {
     final nameColWidth = (pageWidth * 0.65).toInt(); // 65% for name+quantity
     final priceColWidth = pageWidth - nameColWidth; // rest for price
 
-    // Add column headers for products
-    commands.addAll([0x1B, 0x45, 0x01]); // Bold on
-    final nameHeader = 'Mahsulot';
-    final priceHeader = 'Narxi';
-
-    final paddedNameHeader = nameHeader + ' ' * (nameColWidth - nameHeader.length);
-
-    final headerLine = '$paddedNameHeader$priceHeader';
-    commands.addAll(utf8.encode(headerLine));
-    commands.add(0x0A); // Line feed
-    commands.addAll([0x1B, 0x45, 0x00]); // Bold off
-
-    // Another divider line
+    // Add a divider line instead of column headers
     commands.addAll(utf8.encode('-' * pageWidth));
     commands.add(0x0A); // Line feed
 
@@ -258,13 +247,13 @@ class ChequeFormatter {
       final statusLabel = productStatus == 1 ? '' : '(Qaytarilgan)';
       final total = price * quantity;
 
-      // Format price to show commas for thousands
+      // Format price to show commas for thousands with correct Uzbek character
       final formattedPrice = _formatNumber(total);
-      final priceText = '$formattedPrice so\'m';
+      final priceText = '$formattedPrice soʻm';
       final quantityText = '($quantity $unitName)';
 
-      // Include quantity and unit in product name
-      final fullProductName = _sanitizeText('$name $quantityText $statusLabel');
+      // Include quantity and unit after product name with a newline
+      final fullProductName = _sanitizeText('$name\n$quantityText $statusLabel');
 
       // Wrap product name to fit in first column
       final wrappedProductName = _wrapTextWithDash(fullProductName, maxLength: nameColWidth - 1);
@@ -368,17 +357,15 @@ class ChequeFormatter {
     commands.add(0x0A); // Line feed
     commands.addAll([0x1B, 0x45, 0x00]); // Bold off
 
-    // Thank you message - properly centered with larger font
+    // Thank you message with the same format as company name
     if (!isPurchaseReceipt) {
-      // Thank you message - truly centered with larger font
-      commands.addAll([0x1D, 0x21, 0x01]); // GS ! 01 - Slightly larger font (just height doubled)
+      commands.addAll([0x1B, 0x61, 0x01]); // Center align
+      commands.addAll([0x1B, 0x45, 0x01]); // Bold on
       final thankYouMsg = _sanitizeText('Xaridingiz uchun rahmat!');
-      final leftPadding = (pageWidth - thankYouMsg.length) ~/ 2;
-      final rightPadding = pageWidth - thankYouMsg.length - leftPadding;
-      final paddedThankYou = ' ' * leftPadding + thankYouMsg + ' ' * rightPadding;
-      commands.addAll(utf8.encode(paddedThankYou));
+      commands.addAll(utf8.encode(thankYouMsg));
       commands.add(0x0A); // Line feed
-      commands.addAll([0x1D, 0x21, 0x00]); // Reset font size
+      commands.addAll([0x1B, 0x45, 0x00]); // Bold off
+      commands.addAll([0x1B, 0x61, 0x00]); // Reset alignment to left
     }
   }
 
@@ -465,7 +452,10 @@ class ChequeFormatter {
   }
 
   static String _sanitizeText(String text) {
-    // Replace problematic characters with better alternatives
+    // Replace problematic characters with better alternatives except for soʻm
+    if (text.contains("soʻm")) {
+      return text; // Don't modify the special character in soʻm
+    }
     return text.replaceAll('ʻ', '\'')
                .replaceAll('ʼ', '\'')
                .replaceAll('Oʻ', 'O\'')
