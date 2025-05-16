@@ -189,16 +189,6 @@ class _PrinterScreenState extends State<PrinterScreen> {
       return;
     }
 
-    if (_payeeController.text.isEmpty ||
-        _amountController.text.isEmpty ||
-        _chequeNumberController.text.isEmpty ||
-        _accountNumberController.text.isEmpty) {
-      setState(() {
-        _status = 'Please fill in all required fields';
-      });
-      return;
-    }
-
     setState(() {
       _isPrinting = true;
       _status = 'Printing cheque...';
@@ -206,22 +196,31 @@ class _PrinterScreenState extends State<PrinterScreen> {
 
     try {
       // Create a complete receipt data object similar to example-cheque-print.dart
-      final companyName = _companyNameController.text;
-      final transactionId = _chequeNumberController.text;
+      final companyName = _companyNameController.text.isNotEmpty ? _companyNameController.text : "MyStore1";
+      final transactionId = _chequeNumberController.text.isNotEmpty ? _chequeNumberController.text : "00000001";
       final currentDate = DateTime.now();
       final formattedDate = "${currentDate.toIso8601String()}";
 
-      // Create product list
+      // Create product list with at least one default product if none provided
       final products = [];
-      if (_productNameController.text.isNotEmpty && _productQuantityController.text.isNotEmpty) {
+      if (_productNameController.text.isNotEmpty) {
         final productPrice = double.tryParse(_productPriceController.text) ?? 0.0;
-        final productQuantity = double.tryParse(_productQuantityController.text) ?? 0.0;
+        final productQuantity = double.tryParse(_productQuantityController.text) ?? 1.0;
 
         products.add({
           "name": _productNameController.text,
           "quantity": productQuantity,
-          "unitName": _productUnitController.text,
+          "unitName": _productUnitController.text.isNotEmpty ? _productUnitController.text : "dona",
           "currentPrice": productPrice,
+          "status": 1
+        });
+      } else {
+        // Add a default product if none provided
+        products.add({
+          "name": "Test Product",
+          "quantity": 1.0,
+          "unitName": "dona",
+          "currentPrice": 10000.0,
           "status": 1
         });
       }
@@ -234,13 +233,10 @@ class _PrinterScreenState extends State<PrinterScreen> {
 
       // Create payment methods
       final paymentMethods = [];
-      if (_paymentMethodController.text.isNotEmpty) {
-        final methodId = _paymentMethodController.text == "Naqd" ? 1 : 2;
-        paymentMethods.add({
-          "methodId": methodId,
-          "amount": totalAmount
-        });
-      }
+      paymentMethods.add({
+        "methodId": _paymentMethodController.text == "Plastik" ? 2 : 1,
+        "amount": totalAmount
+      });
 
       final bool result = await platform.invokeMethod('printCheque', {
         "companyName": companyName,
@@ -248,7 +244,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
         "createdAt": formattedDate,
         "status": 1,
         "statusName": "",
-        "seller": _sellerController.text,
+        "seller": _sellerController.text.isNotEmpty ? _sellerController.text : "Default Seller",
         "receiver": _receiverController.text,
         "supplierName": _supplierController.text,
         "totalAmount": totalAmount,
@@ -516,61 +512,6 @@ class _PrinterScreenState extends State<PrinterScreen> {
                 _paymentMethodController.text = value;
               }
             },
-          ),
-
-          // Legacy fields (kept for compatibility)
-          const SizedBox(height: 16),
-          const Divider(),
-          const Text(
-            'Additional Fields (Optional)',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: _payeeController,
-            decoration: const InputDecoration(
-              labelText: 'Payee Name',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: _amountController,
-            decoration: const InputDecoration(
-              labelText: 'Amount',
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.number,
-          ),
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: _accountNumberController,
-            decoration: const InputDecoration(
-              labelText: 'Account Number',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: _bankNameController,
-            decoration: const InputDecoration(
-              labelText: 'Bank Name',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: _additionalInfoController,
-            decoration: const InputDecoration(
-              labelText: 'Additional Information',
-              border: OutlineInputBorder(),
-            ),
-            maxLines: 2,
           ),
         ],
       ),

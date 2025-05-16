@@ -246,11 +246,19 @@ import CoreBluetooth
         dateFormatter.dateFormat = "HH:mm"
         let formattedTime = dateFormatter.string(from: date)
 
+        // Setup number formatter for currency
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = " "
+
         // ESC/POS commands for 58mm paper
         var commands: [UInt8] = []
 
         // Initialize printer (ESC @)
         commands.append(contentsOf: [0x1B, 0x40])
+
+        // Calculate the printable width (for 58mm thermal paper it's usually around 32-34 characters)
+        let pageWidth = 32
 
         // Set text alignment center (ESC a 1)
         commands.append(contentsOf: [0x1B, 0x61, 0x01])
@@ -264,13 +272,41 @@ import CoreBluetooth
         // Set text alignment left (ESC a 0)
         commands.append(contentsOf: [0x1B, 0x61, 0x00])
 
-        // Date and time
-        commands.append(contentsOf: "Sana: \(formattedDate)  Vaqti: \(formattedTime)".data(using: .utf8) ?? Data())
+        // Date and time (left and right aligned)
+        let dateText = "Sana: \(formattedDate)"
+        let timeText = "Vaqti: \(formattedTime)"
+        let spacePadding = String(repeating: " ", count: max(1, pageWidth - dateText.count - timeText.count))
+        commands.append(contentsOf: "\(dateText)\(spacePadding)\(timeText)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
-        // Transaction ID
-        commands.append(contentsOf: "Chek raqami: \(transactionId)".data(using: .utf8) ?? Data())
+        // Transaction ID with right alignment
+        let transactionIdLabel = "Chek raqami"
+        let transactionIdValue = "№\(transactionId)"
+        let transIdPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - transactionIdValue.count))
+        commands.append(contentsOf: "\(transactionIdLabel)\(transIdPadding)\(transactionIdValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
+
+        // Personnel information based on transaction type - with right alignment
+        if !seller.isEmpty {
+            let sellerLabel = "Kassir:"
+            let sellerPadding = String(repeating: " ", count: max(1, pageWidth - sellerLabel.count - seller.count))
+            commands.append(contentsOf: "\(sellerLabel)\(sellerPadding)\(seller)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
+
+        if !supplierName.isEmpty {
+            let supplierLabel = "Ta'minotchi:"
+            let supplierPadding = String(repeating: " ", count: max(1, pageWidth - supplierLabel.count - supplierName.count))
+            commands.append(contentsOf: "\(supplierLabel)\(supplierPadding)\(supplierName)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
+
+        if !receiver.isEmpty {
+            let receiverLabel = "Qabul qiluvchi:"
+            let receiverPadding = String(repeating: " ", count: max(1, pageWidth - receiverLabel.count - receiver.count))
+            commands.append(contentsOf: "\(receiverLabel)\(receiverPadding)\(receiver)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+        }
 
         // Status (if not 1)
         if status != 1 && !statusName.isEmpty {
@@ -278,25 +314,9 @@ import CoreBluetooth
             commands.append(contentsOf: [0x0A]) // Line feed
         }
 
-        // Personnel information - different based on transaction type
-        if !seller.isEmpty {
-            commands.append(contentsOf: "Kassir: \(seller)".data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-        }
-
-        if !supplierName.isEmpty {
-            commands.append(contentsOf: "Ta'minotchi: \(supplierName)".data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-        }
-
-        if !receiver.isEmpty {
-            commands.append(contentsOf: "Qabul qiluvchi: \(receiver)".data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-        }
-
         // Horizontal line
         commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
@@ -304,69 +324,81 @@ import CoreBluetooth
         for product in products {
             let name = product["name"] as? String ?? "Unknown Product"
             let quantity = product["quantity"] as? Double ?? 0.0
-            let unitName = product["unitName"] as? String ?? "pcs"
+            let unitName = product["unitName"] as? String ?? "dona"
             let price = product["currentPrice"] as? Double ?? 0.0
             let productStatus = product["status"] as? Int ?? 1
 
             let statusLabel = productStatus == 1 ? "" : "(Qaytarilgan)"
             let total = price * quantity
 
-            // Product name (bold) with status if returned
-            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-            commands.append(contentsOf: "\(name) \(statusLabel)".data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
-
-            // Quantity and unit
-            commands.append(contentsOf: "(\(quantity) \(unitName))".data(using: .utf8) ?? Data())
-
             // Format price to show commas for thousands
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .decimal
-            formatter.groupingSeparator = " "
             let formattedPrice = formatter.string(from: NSNumber(value: total)) ?? "\(total)"
 
-            // Tab over to display price at right
-            commands.append(contentsOf: "    \(formattedPrice) so'm".data(using: .utf8) ?? Data())
+            // Product name (bold) with status if returned - handle long product names
+            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+
+            // If product name is too long, create line breaks
+            let fullProductName = "\(name) \(statusLabel)"
+            if fullProductName.count > pageWidth {
+                // Split the product name
+                var remainingName = fullProductName
+                while !remainingName.isEmpty {
+                    let endIndex = min(remainingName.count, pageWidth)
+                    let chunk = String(remainingName.prefix(endIndex))
+                    commands.append(contentsOf: chunk.data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
+
+                    if endIndex >= remainingName.count {
+                        remainingName = ""
+                    } else {
+                        remainingName = String(remainingName.dropFirst(endIndex))
+                    }
+                }
+            } else {
+                commands.append(contentsOf: fullProductName.data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+            }
+
+            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+            // Quantity and unit on left, price on right
+            let quantityText = "(\(quantity) \(unitName))"
+            let priceText = "\(formattedPrice) so'm"
+            let pricePadding = String(repeating: " ", count: max(1, pageWidth - quantityText.count - priceText.count))
+            commands.append(contentsOf: "\(quantityText)\(pricePadding)\(priceText)".data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
         }
 
         // Horizontal line
         commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
         // Format total amount
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.groupingSeparator = " "
         let formattedTotal = formatter.string(from: NSNumber(value: finalAmount)) ?? "\(finalAmount)"
 
-        // Total amount
-        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: "Umumiy summa:".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
-        // Tab to position price at right
-        commands.append(contentsOf: "    \(formattedTotal) so'm".data(using: .utf8) ?? Data())
+        // Total amount with proper alignment
+        let totalLabel = "Umumiy summa"
+        let totalValue = "\(formattedTotal) so'm"
+        let totalPadding = String(repeating: " ", count: max(1, pageWidth - totalLabel.count - totalValue.count))
+        commands.append(contentsOf: "\(totalLabel)\(totalPadding)\(totalValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
         // Tax (15%)
         let tax = finalAmount * 0.15
         let formattedTax = formatter.string(from: NSNumber(value: tax)) ?? "\(tax)"
-
-        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: "QQS 15%:".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
-        // Tab to position price at right
-        commands.append(contentsOf: "    \(formattedTax) so'm".data(using: .utf8) ?? Data())
+        let taxLabel = "QQS 15%"
+        let taxValue = "\(formattedTax) so'm"
+        let taxPadding = String(repeating: " ", count: max(1, pageWidth - taxLabel.count - taxValue.count))
+        commands.append(contentsOf: "\(taxLabel)\(taxPadding)\(taxValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
         // Payment methods section
         if !paymentMethods.isEmpty {
             // Horizontal line
             commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-            commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
             commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
@@ -381,22 +413,24 @@ import CoreBluetooth
                 let methodName = methodId == 1 ? "Naqd" : "Plastik"
                 let formattedAmount = formatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
 
-                commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-                commands.append(contentsOf: methodName.data(using: .utf8) ?? Data())
-                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
-                // Tab to position price at right
-                commands.append(contentsOf: "    \(formattedAmount) so'm".data(using: .utf8) ?? Data())
+                // Align payment method and amount
+                let methodValue = "\(formattedAmount) so'm"
+                let methodPadding = String(repeating: " ", count: max(1, pageWidth - methodName.count - methodValue.count))
+                commands.append(contentsOf: "\(methodName)\(methodPadding)\(methodValue)".data(using: .utf8) ?? Data())
                 commands.append(contentsOf: [0x0A]) // Line feed
             }
         }
 
         // Change amount (always 0 in the example)
-        commands.append(contentsOf: "Qaytim: 0 so'm".data(using: .utf8) ?? Data())
+        let qaytimLabel = "Qaytim"
+        let qaytimValue = "0 so'm"
+        let qaytimPadding = String(repeating: " ", count: max(1, pageWidth - qaytimLabel.count - qaytimValue.count))
+        commands.append(contentsOf: "\(qaytimLabel)\(qaytimPadding)\(qaytimValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
         // Horizontal line
         commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: "--------------------------------".data(using: .utf8) ?? Data())
+        commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
