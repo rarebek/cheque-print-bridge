@@ -206,250 +206,402 @@ import CoreBluetooth
             ))
         }
 
-        // Extract all possible fields from the received arguments
-        let companyName = chequeDetails["companyName"] as? String ?? "My Company"
-        let transactionId = chequeDetails["transactionId"] as? String ?? "0000000"
-        let status = chequeDetails["status"] as? Int ?? 1
-        let statusName = chequeDetails["statusName"] as? String ?? ""
+        // Accept receipt template settings from Flutter
+        let templateSettings = chequeDetails["templateSettings"] as? [String: Any] ?? [:]
+        let pageWidth = templateSettings["pageWidth"] as? Int ?? 32
+        let useAutoCut = templateSettings["useAutoCut"] as? Bool ?? true
+        let feedLineCount = templateSettings["feedLineCount"] as? Int ?? 4
 
-        // Persons involved
-        let seller = chequeDetails["seller"] as? String ?? ""
-        let receiver = chequeDetails["receiver"] as? String ?? ""
-        let supplierName = chequeDetails["supplierName"] as? String ?? ""
-
-        // Financial details
-        let totalAmount = chequeDetails["totalAmount"] as? Double ?? 0.0
-        let finalAmount = chequeDetails["finalAmount"] as? Double ?? totalAmount
-
-        // Payment method details
-        let paymentMethods = chequeDetails["paymentMethods"] as? [[String: Any]] ?? []
-
-        // Products list
-        let products = chequeDetails["products"] as? [[String: Any]] ?? []
-
-        // Date details
-        let createdDate = chequeDetails["createdAt"] as? String ?? Date().description
-
-        // Format the date for display
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
-        let date: Date
-        if let parsedDate = dateFormatter.date(from: createdDate) {
-            date = parsedDate
-        } else {
-            date = Date()
-        }
-
-        dateFormatter.dateFormat = "dd-MM-yyyy"
-        let formattedDate = dateFormatter.string(from: date)
-
-        dateFormatter.dateFormat = "HH:mm"
-        let formattedTime = dateFormatter.string(from: date)
+        // Check if receipt elements are explicitly provided
+        let receiptElements = chequeDetails["receiptElements"] as? [[String: Any]] ?? []
 
         // Setup number formatter for currency
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.groupingSeparator = " "
 
-        // ESC/POS commands for 58mm paper
+        // ESC/POS commands for the receipt
         var commands: [UInt8] = []
 
         // Initialize printer (ESC @)
         commands.append(contentsOf: [0x1B, 0x40])
 
-        // Calculate the printable width (for 58mm thermal paper it's usually around 32-34 characters)
-        let pageWidth = 32
+        if !receiptElements.isEmpty {
+            // Use the explicitly provided template from Flutter
+            for element in receiptElements {
+                let type = element["type"] as? String ?? ""
+                let text = element["text"] as? String ?? ""
+                let alignment = element["alignment"] as? String ?? "left"
+                let isBold = element["bold"] as? Bool ?? false
+                let isUnderline = element["underline"] as? Bool ?? false
+                let leftPadding = element["leftPadding"] as? Int ?? 0
+                let rightValue = element["rightValue"] as? String
 
-        // Determine receipt type - purchase or sale based on if we have supplier data
-        let isPurchaseReceipt = !supplierName.isEmpty
+                // Apply alignment
+                if alignment == "center" {
+                    let padding = (pageWidth - text.count) / 2
+                    let centeredText = String(repeating: " ", count: max(0, padding)) + text
+                    commands.append(contentsOf: centeredText.data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
+                } else if alignment == "right" {
+                    let padding = pageWidth - text.count
+                    let rightText = String(repeating: " ", count: max(0, padding)) + text
+                    commands.append(contentsOf: rightText.data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
+                } else if alignment == "justified" && rightValue != nil {
+                    // Handle left-right justified text
+                    let padding = pageWidth - text.count - (rightValue?.count ?? 0)
+                    let justifiedText = text + String(repeating: " ", count: max(0, padding)) + (rightValue ?? "")
 
-        // Center the company name - truly centered
-        let companyPadding = (pageWidth - companyName.count) / 2
-        let centeredCompany = String(repeating: " ", count: max(0, companyPadding)) + companyName
-        commands.append(contentsOf: centeredCompany.data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
+                    // Apply bold if needed
+                    if isBold {
+                        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+                    }
 
-        // Helper function to truncate strings that are too long
-        func truncateString(_ string: String, maxLength: Int) -> String {
-            if string.count > maxLength {
-                let index = string.index(string.startIndex, offsetBy: maxLength)
-                return String(string[..<index])
-            }
-            return string
-        }
+                    // Apply underline if needed
+                    if isUnderline {
+                        commands.append(contentsOf: [0x1B, 0x2D, 0x01]) // Underline on
+                    }
 
-        // Helper function to right-align values with truncation
-        func appendLabelWithRightAlignedValue(label: String, value: String) {
-            let maxLabelWidth = 13 // Adjust to fit your receipt width
-            let maxValueWidth = pageWidth - maxLabelWidth - 1
+                    commands.append(contentsOf: justifiedText.data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
 
-            let truncatedLabel = truncateString(label, maxLength: maxLabelWidth)
-            let truncatedValue = truncateString(value, maxLength: maxValueWidth)
+                    // Reset formatting
+                    if isBold {
+                        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+                    }
 
-            let padding = String(repeating: " ", count: max(1, pageWidth - truncatedLabel.count - truncatedValue.count))
-            commands.append(contentsOf: "\(truncatedLabel)\(padding)\(truncatedValue)".data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-        }
+                    if isUnderline {
+                        commands.append(contentsOf: [0x1B, 0x2D, 0x00]) // Underline off
+                    }
+                } else {
+                    // Handle left alignment with optional padding
+                    let paddedText = String(repeating: " ", count: leftPadding) + text
 
-        // Date and time (left and right aligned)
-        let dateText = "Sana:\(formattedDate)"
-        let timeText = "Vaqti:\(formattedTime)"
-        let spacePadding = String(repeating: " ", count: max(1, pageWidth - dateText.count - timeText.count))
-        commands.append(contentsOf: "\(dateText)\(spacePadding)\(timeText)".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
+                    // Apply bold if needed
+                    if isBold {
+                        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+                    }
 
-        // Transaction ID with right alignment - truncated if needed
-        let transactionIdLabel = "Chek raqami: "
-        let truncatedId = truncateString(transactionId, maxLength: pageWidth - transactionIdLabel.count - 1)
-        let transIdPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - truncatedId.count))
-        commands.append(contentsOf: "\(transactionIdLabel)\(transIdPadding)\(truncatedId)".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
+                    // Apply underline if needed
+                    if isUnderline {
+                        commands.append(contentsOf: [0x1B, 0x2D, 0x01]) // Underline on
+                    }
 
-        // Personnel information based on receipt type
-        if isPurchaseReceipt {
-            // Purchase receipt: supplier and receiver
-            if !supplierName.isEmpty {
-                appendLabelWithRightAlignedValue(label: "Ta'minotchi:", value: supplierName)
-            }
+                    commands.append(contentsOf: paddedText.data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
 
-            if !receiver.isEmpty {
-                appendLabelWithRightAlignedValue(label: "Qabul qiluvchi:", value: receiver)
+                    // Reset formatting
+                    if isBold {
+                        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+                    }
+
+                    if isUnderline {
+                        commands.append(contentsOf: [0x1B, 0x2D, 0x00]) // Underline off
+                    }
+                }
             }
         } else {
-            // Sales receipt: cashier
-            if !seller.isEmpty {
-                appendLabelWithRightAlignedValue(label: "Kassir:", value: seller)
+            // Use the default template if no explicit elements are provided
+            // (Keep your existing code here as a fallback)
+            // Extract all possible fields from the received arguments
+            let companyName = chequeDetails["companyName"] as? String ?? "My Company"
+            let transactionId = chequeDetails["transactionId"] as? String ?? "0000000"
+            let status = chequeDetails["status"] as? Int ?? 1
+            let statusName = chequeDetails["statusName"] as? String ?? ""
+
+            // Persons involved
+            let seller = chequeDetails["seller"] as? String ?? ""
+            let receiver = chequeDetails["receiver"] as? String ?? ""
+            let supplierName = chequeDetails["supplierName"] as? String ?? ""
+
+            // Financial details
+            let totalAmount = chequeDetails["totalAmount"] as? Double ?? 0.0
+            let finalAmount = chequeDetails["finalAmount"] as? Double ?? totalAmount
+
+            // Payment method details
+            let paymentMethods = chequeDetails["paymentMethods"] as? [[String: Any]] ?? []
+
+            // Products list
+            let products = chequeDetails["products"] as? [[String: Any]] ?? []
+
+            // Date details
+            let createdDate = chequeDetails["createdAt"] as? String ?? Date().description
+
+            // Format the date for display
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+            let date: Date
+            if let parsedDate = dateFormatter.date(from: createdDate) {
+                date = parsedDate
+            } else {
+                date = Date()
             }
-        }
 
-        // Status (if not 1)
-        if status != 1 && !statusName.isEmpty {
-            commands.append(contentsOf: "Holati: \(statusName)".data(using: .utf8) ?? Data())
+            dateFormatter.dateFormat = "dd-MM-yyyy"
+            let formattedDate = dateFormatter.string(from: date)
+
+            dateFormatter.dateFormat = "HH:mm"
+            let formattedTime = dateFormatter.string(from: date)
+
+            // Determine receipt type - purchase or sale based on if we have supplier data
+            let isPurchaseReceipt = !supplierName.isEmpty
+
+            // Center the company name - truly centered
+            let companyPadding = (pageWidth - companyName.count) / 2
+            let centeredCompany = String(repeating: " ", count: max(0, companyPadding)) + companyName
+            commands.append(contentsOf: centeredCompany.data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
-        }
 
-        // Horizontal line
-        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+            // Helper function to wrap strings that are too long
+            func wrapText(_ string: String, maxLength: Int) -> [String] {
+                var result: [String] = []
+                var currentLine = ""
 
-        // Products - with quantity centered
-        for product in products {
-            let name = product["name"] as? String ?? "Unknown Product"
-            let quantity = product["quantity"] as? Double ?? 0.0
-            let unitName = product["unitName"] as? String ?? "dona"
-            let price = product["currentPrice"] as? Double ?? 0.0
-            let productStatus = product["status"] as? Int ?? 1
+                // Split text into words
+                let words = string.split(separator: " ")
 
-            let statusLabel = productStatus == 1 ? "" : "(Qaytarilgan)"
-            let total = price * quantity
+                for word in words {
+                    // If this word would make the line too long, start a new line
+                    if currentLine.count + word.count + 1 > maxLength {
+                        if !currentLine.isEmpty {
+                            result.append(currentLine)
+                            currentLine = String(word)
+                        } else {
+                            // Word itself is longer than maxLength, need to split it
+                            var remainingWord = String(word)
+                            while remainingWord.count > maxLength {
+                                let index = remainingWord.index(remainingWord.startIndex, offsetBy: maxLength)
+                                result.append(String(remainingWord[..<index]))
+                                remainingWord = String(remainingWord[index...])
+                            }
+                            currentLine = remainingWord
+                        }
+                    } else {
+                        // Add space before word if not at beginning of line
+                        if !currentLine.isEmpty {
+                            currentLine += " "
+                        }
+                        currentLine += String(word)
+                    }
+                }
 
-            // Format price to show commas for thousands
-            let formattedPrice = formatter.string(from: NSNumber(value: total)) ?? "\(total)"
-            let priceText = "\(formattedPrice) so'm"
-            let quantityText = "(\(quantity) \(unitName))"
+                // Don't forget the last line
+                if !currentLine.isEmpty {
+                    result.append(currentLine)
+                }
 
-            // Product name (bold) - truncate if too long
-            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-            let fullProductName = "\(name) \(statusLabel)"
-            let truncatedName = truncateString(fullProductName, maxLength: pageWidth)
-            commands.append(contentsOf: truncatedName.data(using: .utf8) ?? Data())
+                return result.isEmpty ? [string] : result
+            }
+
+            // Helper function to right-align values with wrapping
+            func appendLabelWithRightAlignedValue(label: String, value: String) {
+                let maxLabelWidth = 13 // Adjust to fit your receipt width
+                let maxValueWidth = pageWidth - maxLabelWidth - 1
+
+                // Wrap the value if needed
+                let wrappedValues = wrapText(value, maxLength: maxValueWidth)
+
+                // First line includes the label
+                if let firstLine = wrappedValues.first {
+                    let padding = String(repeating: " ", count: max(1, pageWidth - label.count - firstLine.count))
+                    commands.append(contentsOf: "\(label)\(padding)\(firstLine)".data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
+                }
+
+                // Remaining lines (if any)
+                if wrappedValues.count > 1 {
+                    let labelSpace = String(repeating: " ", count: maxLabelWidth)
+                    for i in 1..<wrappedValues.count {
+                        let padding = String(repeating: " ", count: max(1, pageWidth - labelSpace.count - wrappedValues[i].count))
+                        commands.append(contentsOf: "\(labelSpace)\(padding)\(wrappedValues[i])".data(using: .utf8) ?? Data())
+                        commands.append(contentsOf: [0x0A]) // Line feed
+                    }
+                }
+            }
+
+            // Date and time (left and right aligned)
+            let dateText = "Sana:\(formattedDate)"
+            let timeText = "Vaqti:\(formattedTime)"
+            let spacePadding = String(repeating: " ", count: max(1, pageWidth - dateText.count - timeText.count))
+            commands.append(contentsOf: "\(dateText)\(spacePadding)\(timeText)".data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
-            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-            // Calculate column widths for 3-column layout
-            let priceColWidth = min(priceText.count + 1, pageWidth / 3)
-            let quantityColWidth = min(quantityText.count, pageWidth / 3)
-            let leftColWidth = pageWidth - priceColWidth - quantityColWidth
+            // Transaction ID with right alignment - wrapped if needed
+            let transactionIdLabel = "Chek raqami: "
+            let wrappedIds = wrapText(transactionId, maxLength: pageWidth - transactionIdLabel.count - 1)
 
-            // Create the spacing to center the quantity
-            let leftPadding = String(repeating: " ", count: leftColWidth)
-            let rightPadding = String(repeating: " ", count: max(1, pageWidth - leftColWidth - quantityText.count - priceText.count))
+            if let firstLine = wrappedIds.first {
+                let idPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - firstLine.count))
+                commands.append(contentsOf: "\(transactionIdLabel)\(idPadding)\(firstLine)".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
 
-            // Print quantity centered and price right-aligned
-            commands.append(contentsOf: "\(leftPadding)\(quantityText)\(rightPadding)\(priceText)".data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
-        }
+                // Print additional lines if wrapped
+                if wrappedIds.count > 1 {
+                    let labelSpace = String(repeating: " ", count: transactionIdLabel.count)
+                    for i in 1..<wrappedIds.count {
+                        let linePadding = String(repeating: " ", count: max(1, pageWidth - labelSpace.count - wrappedIds[i].count))
+                        commands.append(contentsOf: "\(labelSpace)\(linePadding)\(wrappedIds[i])".data(using: .utf8) ?? Data())
+                        commands.append(contentsOf: [0x0A]) // Line feed
+                    }
+                }
+            }
 
-        // Horizontal line
-        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
+            // Personnel information based on receipt type
+            if isPurchaseReceipt {
+                // Purchase receipt: supplier and receiver
+                if !supplierName.isEmpty {
+                    appendLabelWithRightAlignedValue(label: "Ta'minotchi:", value: supplierName)
+                }
 
-        // Format total amount - Bold both label and value
-        let formattedTotal = formatter.string(from: NSNumber(value: finalAmount)) ?? "\(finalAmount)"
-        let totalLabel = "Umumiy summa"
-        let totalValue = "\(formattedTotal) so'm"
-        let totalPadding = String(repeating: " ", count: max(1, pageWidth - totalLabel.count - totalValue.count))
-        commands.append(contentsOf: "\(totalLabel)\(totalPadding)\(totalValue)".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
+                if !receiver.isEmpty {
+                    appendLabelWithRightAlignedValue(label: "Qabul qiluvchi:", value: receiver)
+                }
+            } else {
+                // Sales receipt: cashier
+                if !seller.isEmpty {
+                    appendLabelWithRightAlignedValue(label: "Kassir:", value: seller)
+                }
+            }
 
-        // Tax (15%)
-        let tax = finalAmount * 0.15
-        let formattedTax = formatter.string(from: NSNumber(value: tax)) ?? "\(tax)"
-        let taxLabel = "QQS 15%"
-        let taxValue = "\(formattedTax) so'm"
-        let taxPadding = String(repeating: " ", count: max(1, pageWidth - taxLabel.count - taxValue.count))
-        commands.append(contentsOf: "\(taxLabel)\(taxPadding)\(taxValue)".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+            // Status (if not 1)
+            if status != 1 && !statusName.isEmpty {
+                commands.append(contentsOf: "Holati: \(statusName)".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+            }
 
-        // Payment methods section (only for sales receipts)
-        if !isPurchaseReceipt && !paymentMethods.isEmpty {
             // Horizontal line
             commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
             commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
             commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
+            // Products - with quantity centered
+            for product in products {
+                let name = product["name"] as? String ?? "Unknown Product"
+                let quantity = product["quantity"] as? Double ?? 0.0
+                let unitName = product["unitName"] as? String ?? "dona"
+                let price = product["currentPrice"] as? Double ?? 0.0
+                let productStatus = product["status"] as? Int ?? 1
+
+                let statusLabel = productStatus == 1 ? "" : "(Qaytarilgan)"
+                let total = price * quantity
+
+                // Format price to show commas for thousands
+                let formattedPrice = formatter.string(from: NSNumber(value: total)) ?? "\(total)"
+                let priceText = "\(formattedPrice) so'm"
+                let quantityText = "(\(quantity) \(unitName))"
+
+                // Product name (bold) - wrap if too long
+                commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+                let fullProductName = "\(name) \(statusLabel)"
+                let wrappedProductName = wrapText(fullProductName, maxLength: pageWidth)
+
+                for line in wrappedProductName {
+                    commands.append(contentsOf: line.data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
+                }
+                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+                // Calculate column widths for 3-column layout
+                let priceColWidth = min(priceText.count + 1, pageWidth / 3)
+                let quantityColWidth = min(quantityText.count, pageWidth / 3)
+                let leftColWidth = pageWidth - priceColWidth - quantityColWidth
+
+                // Create the spacing to center the quantity
+                let leftPadding = String(repeating: " ", count: leftColWidth)
+                let rightPadding = String(repeating: " ", count: max(1, pageWidth - leftColWidth - quantityText.count - priceText.count))
+
+                // Print quantity centered and price right-aligned
+                commands.append(contentsOf: "\(leftPadding)\(quantityText)\(rightPadding)\(priceText)".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+            }
+
+            // Horizontal line
             commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-            commands.append(contentsOf: "To'lov turi:".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+
+            // Format total amount - Bold both label and value
+            let formattedTotal = formatter.string(from: NSNumber(value: finalAmount)) ?? "\(finalAmount)"
+            let totalLabel = "Umumiy summa"
+            let totalValue = "\(formattedTotal) so'm"
+            let totalPadding = String(repeating: " ", count: max(1, pageWidth - totalLabel.count - totalValue.count))
+            commands.append(contentsOf: "\(totalLabel)\(totalPadding)\(totalValue)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+
+            // Tax (15%)
+            let tax = finalAmount * 0.15
+            let formattedTax = formatter.string(from: NSNumber(value: tax)) ?? "\(tax)"
+            let taxLabel = "QQS 15%"
+            let taxValue = "\(formattedTax) so'm"
+            let taxPadding = String(repeating: " ", count: max(1, pageWidth - taxLabel.count - taxValue.count))
+            commands.append(contentsOf: "\(taxLabel)\(taxPadding)\(taxValue)".data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
             commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-            for method in paymentMethods {
-                let methodId = method["methodId"] as? Int ?? 0
-                let amount = method["amount"] as? Double ?? 0.0
-                let methodName = methodId == 1 ? "Naqd" : "Plastik"
-                let formattedAmount = formatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
+            // Payment methods section (only for sales receipts)
+            if !isPurchaseReceipt && !paymentMethods.isEmpty {
+                // Horizontal line
+                commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+                commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-                // Align payment method and amount
-                let methodValue = "\(formattedAmount) so'm"
-                let methodPadding = String(repeating: " ", count: max(1, pageWidth - methodName.count - methodValue.count))
-                commands.append(contentsOf: "\(methodName)\(methodPadding)\(methodValue)".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+                commands.append(contentsOf: "To'lov turi:".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+                for method in paymentMethods {
+                    let methodId = method["methodId"] as? Int ?? 0
+                    let amount = method["amount"] as? Double ?? 0.0
+                    let methodName = methodId == 1 ? "Naqd" : "Plastik"
+                    let formattedAmount = formatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
+
+                    // Align payment method and amount
+                    let methodValue = "\(formattedAmount) so'm"
+                    let methodPadding = String(repeating: " ", count: max(1, pageWidth - methodName.count - methodValue.count))
+                    commands.append(contentsOf: "\(methodName)\(methodPadding)\(methodValue)".data(using: .utf8) ?? Data())
+                    commands.append(contentsOf: [0x0A]) // Line feed
+                }
+            }
+
+            // Change amount (always 0 in the example)
+            let qaytimLabel = "Qaytim"
+            let qaytimValue = "0 so'm"
+            let qaytimPadding = String(repeating: " ", count: max(1, pageWidth - qaytimLabel.count - qaytimValue.count))
+            commands.append(contentsOf: "\(qaytimLabel)\(qaytimPadding)\(qaytimValue)".data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+
+            // Horizontal line
+            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+            commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+            // Thank you message - only for sales receipts
+            if !isPurchaseReceipt {
+                // Thank you message - truly centered
+                let thankYouMsg = "Xaridingiz uchun rahmat!"
+                // Force center alignment with exact character counting
+                let leftPadding = (pageWidth - thankYouMsg.count) / 2
+                let rightPadding = pageWidth - thankYouMsg.count - leftPadding
+                let paddedThankYou = String(repeating: " ", count: leftPadding) + thankYouMsg + String(repeating: " ", count: rightPadding)
+                commands.append(contentsOf: paddedThankYou.data(using: .utf8) ?? Data())
                 commands.append(contentsOf: [0x0A]) // Line feed
             }
         }
 
-        // Change amount (always 0 in the example)
-        let qaytimLabel = "Qaytim"
-        let qaytimValue = "0 so'm"
-        let qaytimPadding = String(repeating: " ", count: max(1, pageWidth - qaytimLabel.count - qaytimValue.count))
-        commands.append(contentsOf: "\(qaytimLabel)\(qaytimPadding)\(qaytimValue)".data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
-
-        // Horizontal line
-        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
-        commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
-        commands.append(contentsOf: [0x0A]) // Line feed
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
-
-        // Thank you message - only for sales receipts
-        if !isPurchaseReceipt {
-            // Thank you message - truly centered
-            let thankYouMsg = "Xaridingiz uchun rahmat!"
-            // Force center alignment with exact character counting
-            let leftPadding = (pageWidth - thankYouMsg.count) / 2
-            let rightPadding = pageWidth - thankYouMsg.count - leftPadding
-            let paddedThankYou = String(repeating: " ", count: leftPadding) + thankYouMsg + String(repeating: " ", count: rightPadding)
-            commands.append(contentsOf: paddedThankYou.data(using: .utf8) ?? Data())
+        // Add feed lines based on template settings
+        for _ in 0..<feedLineCount {
             commands.append(contentsOf: [0x0A]) // Line feed
         }
 
-        // Feed and cut
-        commands.append(contentsOf: [0x0A, 0x0A, 0x0A, 0x0A]) // Feed lines
-        commands.append(contentsOf: [0x1D, 0x56, 0x01]) // Cut paper (partial cut)
+        // Add cut command if auto-cut is enabled
+        if useAutoCut {
+            commands.append(contentsOf: [0x1D, 0x56, 0x01]) // Cut paper (partial cut)
+        }
 
         // Send the commands to the printer
         let commandData = Data(commands)
