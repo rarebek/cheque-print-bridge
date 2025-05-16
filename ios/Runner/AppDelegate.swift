@@ -354,8 +354,8 @@ import CoreBluetooth
             commands.append(contentsOf: [0x1B, 0x61, 0x01]) // ESC a 1 - Center align
             let safeCompanyName = sanitizeText(companyName)
 
-            // Use a wider maxLength to make company name less tall (fewer lines)
-            let wrappedCompanyName = wrapTextWithDash(safeCompanyName, maxLength: min(pageWidth - 2, 20))
+            // Use standard width for company name to reduce height while maintaining readability
+            let wrappedCompanyName = wrapTextWithDash(safeCompanyName, maxLength: 16)
 
             for line in wrappedCompanyName {
                 commands.append(contentsOf: line.data(using: .utf8) ?? Data())
@@ -364,7 +364,7 @@ import CoreBluetooth
 
             commands.append(contentsOf: [0x1B, 0x61, 0x00]) // Reset alignment to left
 
-            // Helper function to wrap text with 8-character limit and dash-based word splitting
+            // Helper function to wrap text with strict 8-character limit for words and dash-based splitting
             func wrapTextWithDash(_ string: String, maxLength: Int = 8) -> [String] {
                 var result: [String] = []
                 var currentLine = ""
@@ -383,15 +383,16 @@ import CoreBluetooth
                             currentLine = ""
                         }
 
-                        // Split long word with dashes
+                        // Split long word with dashes - always put dash at 8th character
                         var remainingWord = wordStr
-                        while remainingWord.count > maxLength {
-                            let index = remainingWord.index(remainingWord.startIndex, offsetBy: maxLength - 1)
-                            let lineWithDash = String(remainingWord[...index]) + "-"
+                        while remainingWord.count > 8 {
+                            // Always split at 8 characters with dash
+                            let dashedIndex = remainingWord.index(remainingWord.startIndex, offsetBy: 7)
+                            let lineWithDash = String(remainingWord[...dashedIndex]) + "-"
                             result.append(lineWithDash)
 
                             // Move to next part of the word
-                            remainingWord = String(remainingWord[remainingWord.index(after: index)...])
+                            remainingWord = String(remainingWord[remainingWord.index(after: dashedIndex)...])
                         }
 
                         // Add any remaining part of the word
@@ -530,25 +531,37 @@ import CoreBluetooth
                 // Wrap product name to fit reasonable width for better formatting
                 let wrappedProductName = wrapTextWithDash(fullProductName, maxLength: min(16, pageWidth - 10))
 
-                // Print first line of product name with quantity and price on the right
-                if let firstLine = wrappedProductName.first {
-                    // Ensure price always prints by using minimum padding of 1 and limiting firstLine length if needed
-                    let maxAllowableLengthForFirstLine = pageWidth - quantityText.count - priceText.count - 3
-                    let truncatedFirstLine = firstLine.count > maxAllowableLengthForFirstLine
-                        ? String(firstLine.prefix(maxAllowableLengthForFirstLine))
+                // Print product name with quantity and price on the right - properly aligned
+                if !wrappedProductName.isEmpty {
+                    // First line: Product name with quantity and price aligned to the right
+                    let firstLine = wrappedProductName[0]
+
+                    // Calculate needed padding to position price at far right
+                    // Make sure there's enough space for the price
+                    let truncatedFirstLine = firstLine.count > pageWidth - priceText.count - 3
+                        ? String(firstLine.prefix(pageWidth - priceText.count - 3))
                         : firstLine
 
-                    let firstLinePadding = max(1, pageWidth - truncatedFirstLine.count - quantityText.count - priceText.count - 2)
-                    let firstRowWithDetails = "\(truncatedFirstLine)\(String(repeating: " ", count: firstLinePadding))\(quantityText) \(priceText)"
-                    commands.append(contentsOf: firstRowWithDetails.data(using: .utf8) ?? Data())
+                    let rightSidePadding = max(1, pageWidth - truncatedFirstLine.count - priceText.count - 1)
+                    let firstLineWithPrice = "\(truncatedFirstLine)\(String(repeating: " ", count: rightSidePadding))\(priceText)"
+                    commands.append(contentsOf: firstLineWithPrice.data(using: .utf8) ?? Data())
                     commands.append(contentsOf: [0x0A]) // Line feed
 
-                    // Print remaining lines of product name if any
+                    // Second line: Quantity information (if any product name lines remain)
                     if wrappedProductName.count > 1 {
+                        // Print quantity info on its own line
+                        commands.append(contentsOf: quantityText.data(using: .utf8) ?? Data())
+                        commands.append(contentsOf: [0x0A]) // Line feed
+
+                        // Print remaining lines of product name
                         for i in 1..<wrappedProductName.count {
                             commands.append(contentsOf: wrappedProductName[i].data(using: .utf8) ?? Data())
                             commands.append(contentsOf: [0x0A]) // Line feed
                         }
+                    } else {
+                        // If no more product name lines, print quantity on its own line
+                        commands.append(contentsOf: quantityText.data(using: .utf8) ?? Data())
+                        commands.append(contentsOf: [0x0A]) // Line feed
                     }
                 }
 
