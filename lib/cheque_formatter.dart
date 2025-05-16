@@ -178,25 +178,34 @@ class ChequeFormatter {
     commands.addAll(utf8.encode('$dateText$spacePadding$timeText'));
     commands.add(0x0A); // Line feed
 
-    // Transaction ID with right alignment - wrapped if needed
+    // Transaction ID with 50/50 layout
     final transactionIdLabel = 'Chek raqami: ';
-    final wrappedIds = _wrapTextWithDash(_sanitizeText(transactionId), maxLength: pageWidth - transactionIdLabel.length - 1);
 
-    if (wrappedIds.isNotEmpty) {
-      final firstLine = wrappedIds[0];
-      final idPadding = ' ' * (pageWidth - transactionIdLabel.length - firstLine.length);
-      commands.addAll(utf8.encode('$transactionIdLabel$idPadding$firstLine'));
+    // Calculate 50% of the page width
+    final halfPageWidth = pageWidth ~/ 2;
+
+    // Ensure the label fits in the left half
+    final displayLabel = transactionIdLabel.length > halfPageWidth
+        ? transactionIdLabel.substring(0, halfPageWidth - 3) + "..."
+        : transactionIdLabel;
+
+    // Format the transaction ID to fit in right half
+    final labelPadding = ' ' * (halfPageWidth - displayLabel.length);
+    final paddedLabel = displayLabel + labelPadding;
+
+    // Truncate or wrap the ID if needed to fit in the right half
+    if (transactionId.length <= halfPageWidth) {
+      commands.addAll(utf8.encode('$paddedLabel$transactionId'));
+      commands.add(0x0A); // Line feed
+    } else {
+      // Show first line with the initial part of the ID
+      commands.addAll(utf8.encode('$paddedLabel${transactionId.substring(0, halfPageWidth)}'));
       commands.add(0x0A); // Line feed
 
-      // Print additional lines if wrapped
-      if (wrappedIds.length > 1) {
-        final labelSpace = ' ' * transactionIdLabel.length;
-        for (int i = 1; i < wrappedIds.length; i++) {
-          final linePadding = ' ' * (pageWidth - labelSpace.length - wrappedIds[i].length);
-          commands.addAll(utf8.encode('$labelSpace$linePadding${wrappedIds[i]}'));
-          commands.add(0x0A); // Line feed
-        }
-      }
+      // Show rest of the ID on next line, aligned with the right column
+      final remainingId = transactionId.substring(halfPageWidth);
+      commands.addAll(utf8.encode(' ' * halfPageWidth + remainingId));
+      commands.add(0x0A); // Line feed
     }
 
     // Personnel information based on receipt type
@@ -229,8 +238,8 @@ class ChequeFormatter {
     commands.addAll([0x1B, 0x45, 0x00]); // Bold off
 
     // Define column widths for 2-column layout
-    final nameColWidth = (pageWidth * 0.65).toInt(); // 65% for name+quantity
-    final priceColWidth = pageWidth - nameColWidth; // rest for price
+    final nameColWidth = (pageWidth * 0.6).toInt(); // 60% for name+quantity
+    final priceColWidth = pageWidth - nameColWidth; // 40% for price
 
     // Add a divider line instead of column headers
     commands.addAll(utf8.encode('-' * pageWidth));
@@ -269,10 +278,23 @@ class ChequeFormatter {
         // Create padded columns
         final paddedName = displayName + ' ' * (nameColWidth - displayName.length);
 
-        // Combine both columns
-        final fullLine = '$paddedName$priceText';
-        commands.addAll(utf8.encode(fullLine));
-        commands.add(0x0A); // Line feed
+        // Check if the price text will fit in the price column
+        if (priceText.length <= priceColWidth) {
+          // Price fits in one line
+          final fullLine = '$paddedName$priceText';
+          commands.addAll(utf8.encode(fullLine));
+          commands.add(0x0A); // Line feed
+        } else {
+          // Price needs to wrap to next line
+          // First line with just the product name
+          commands.addAll(utf8.encode(paddedName));
+          commands.add(0x0A); // Line feed
+
+          // Second line with price right-aligned
+          final pricePadding = ' ' * (pageWidth - priceText.length);
+          commands.addAll(utf8.encode(pricePadding + priceText));
+          commands.add(0x0A); // Line feed
+        }
 
         // Print remaining lines of product name if any
         if (wrappedProductName.length > 1) {
