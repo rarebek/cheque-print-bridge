@@ -82,9 +82,14 @@ class _PrinterScreenState extends State<PrinterScreen> {
     try {
       final List<dynamic> result = await platform.invokeMethod('scanDevices');
       setState(() {
-        _devices = List<Map<String, dynamic>>.from(result.map(
-          (device) => Map<String, dynamic>.from(device)
-        ));
+        _devices = List<Map<String, dynamic>>.from(
+          result.map((device) =>
+            Map<String, dynamic>.from({
+              'id': device['id']?.toString() ?? '',
+              'name': device['name']?.toString() ?? 'Unknown Device'
+            })
+          )
+        );
         _status = 'Found ${_devices.length} devices';
         _isScanning = false;
       });
