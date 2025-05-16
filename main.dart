@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'cheque_formatter.dart';
+import 'cheque_designer.dart';
 
 void main() {
   runApp(const MyApp());
@@ -38,6 +40,9 @@ class _PrinterScreenState extends State<PrinterScreen> {
   bool _isConnecting = false;
   bool _isPrinting = false;
   String? _connectedDeviceId;
+
+  // Current template data from the designer
+  Map<String, dynamic>? _templateData;
 
   // Controllers for cheque details
   final _payeeController = TextEditingController();
@@ -195,62 +200,139 @@ class _PrinterScreenState extends State<PrinterScreen> {
     });
 
     try {
-      // Create a complete receipt data object similar to example-cheque-print.dart
-      final companyName = _companyNameController.text.isNotEmpty ? _companyNameController.text : "MyStore1";
-      final transactionId = _chequeNumberController.text.isNotEmpty ? _chequeNumberController.text : "00000001";
-      final currentDate = DateTime.now();
-      final formattedDate = "${currentDate.toIso8601String()}";
+      // Create the cheque data, using template data if available
+      Map<String, dynamic> chequeData;
 
-      // Create product list with at least one default product if none provided
-      final products = [];
-      if (_productNameController.text.isNotEmpty) {
-        final productPrice = double.tryParse(_productPriceController.text) ?? 0.0;
-        final productQuantity = double.tryParse(_productQuantityController.text) ?? 1.0;
+      if (_templateData != null) {
+        chequeData = Map<String, dynamic>.from(_templateData!);
 
-        products.add({
-          "name": _productNameController.text,
-          "quantity": productQuantity,
-          "unitName": _productUnitController.text.isNotEmpty ? _productUnitController.text : "dona",
-          "currentPrice": productPrice,
-          "status": 1
-        });
+        // Update with current form values
+        if (_companyNameController.text.isNotEmpty) {
+          chequeData["companyName"] = _companyNameController.text;
+        }
+
+        if (_chequeNumberController.text.isNotEmpty) {
+          chequeData["transactionId"] = _chequeNumberController.text;
+        }
+
+        if (_sellerController.text.isNotEmpty) {
+          chequeData["seller"] = _sellerController.text;
+        }
+
+        if (_receiverController.text.isNotEmpty) {
+          chequeData["receiver"] = _receiverController.text;
+        }
+
+        if (_supplierController.text.isNotEmpty) {
+          chequeData["supplierName"] = _supplierController.text;
+        }
+
+        // Add or update product if provided
+        if (_productNameController.text.isNotEmpty) {
+          final productPrice = double.tryParse(_productPriceController.text) ?? 0.0;
+          final productQuantity = double.tryParse(_productQuantityController.text) ?? 1.0;
+
+          final newProduct = {
+            "name": _productNameController.text,
+            "quantity": productQuantity,
+            "unitName": _productUnitController.text.isNotEmpty ? _productUnitController.text : "dona",
+            "currentPrice": productPrice,
+            "status": 1
+          };
+
+          // Add to products list or create new list
+          if (chequeData.containsKey("products")) {
+            (chequeData["products"] as List).add(newProduct);
+          } else {
+            chequeData["products"] = [newProduct];
+          }
+        }
+
+        // Recalculate total
+        double totalAmount = 0.0;
+        for (final product in (chequeData["products"] as List)) {
+          totalAmount += (product["currentPrice"] as double) * (product["quantity"] as double);
+        }
+
+        chequeData["totalAmount"] = totalAmount;
+        chequeData["finalAmount"] = totalAmount;
+
+        // Update payment method if provided
+        chequeData["paymentMethods"] = [{
+          "methodId": _paymentMethodController.text == "Plastik" ? 2 : 1,
+          "amount": totalAmount
+        }];
       } else {
-        // Add a default product if none provided
-        products.add({
-          "name": "Test Product",
-          "quantity": 1.0,
-          "unitName": "dona",
-          "currentPrice": 10000.0,
-          "status": 1
+        // Use default data from form inputs if no template
+        final companyName = _companyNameController.text.isNotEmpty ? _companyNameController.text : "MyStore1";
+        final transactionId = _chequeNumberController.text.isNotEmpty ? _chequeNumberController.text : "00000001";
+        final currentDate = DateTime.now();
+        final formattedDate = "${currentDate.toIso8601String()}";
+
+        // Create product list with at least one default product if none provided
+        final products = [];
+        if (_productNameController.text.isNotEmpty) {
+          final productPrice = double.tryParse(_productPriceController.text) ?? 0.0;
+          final productQuantity = double.tryParse(_productQuantityController.text) ?? 1.0;
+
+          products.add({
+            "name": _productNameController.text,
+            "quantity": productQuantity,
+            "unitName": _productUnitController.text.isNotEmpty ? _productUnitController.text : "dona",
+            "currentPrice": productPrice,
+            "status": 1
+          });
+        } else {
+          // Add a default product if none provided
+          products.add({
+            "name": "Test Product",
+            "quantity": 1.0,
+            "unitName": "dona",
+            "currentPrice": 10000.0,
+            "status": 1
+          });
+        }
+
+        // Calculate total
+        double totalAmount = 0.0;
+        for (final product in products) {
+          totalAmount += (product["currentPrice"] as double) * (product["quantity"] as double);
+        }
+
+        // Create payment methods
+        final paymentMethods = [];
+        paymentMethods.add({
+          "methodId": _paymentMethodController.text == "Plastik" ? 2 : 1,
+          "amount": totalAmount
         });
+
+        chequeData = {
+          "companyName": companyName,
+          "transactionId": transactionId,
+          "createdAt": formattedDate,
+          "status": 1,
+          "statusName": "",
+          "seller": _sellerController.text.isNotEmpty ? _sellerController.text : "Default Seller",
+          "receiver": _receiverController.text,
+          "supplierName": _supplierController.text,
+          "totalAmount": totalAmount,
+          "finalAmount": totalAmount,
+          "products": products,
+          "paymentMethods": paymentMethods
+        };
       }
 
-      // Calculate total
-      double totalAmount = 0.0;
-      for (final product in products) {
-        totalAmount += (product["currentPrice"] as double) * (product["quantity"] as double);
-      }
+      // Format the cheque in Flutter
+      final rawCommandsData = ChequeFormatter.formatCheque(
+        chequeDetails: chequeData,
+        pageWidth: 32,
+        useAutoCut: true,
+        feedLineCount: 4,
+      );
 
-      // Create payment methods
-      final paymentMethods = [];
-      paymentMethods.add({
-        "methodId": _paymentMethodController.text == "Plastik" ? 2 : 1,
-        "amount": totalAmount
-      });
-
+      // Pass the raw command data to Swift
       final bool result = await platform.invokeMethod('printCheque', {
-        "companyName": companyName,
-        "transactionId": transactionId,
-        "createdAt": formattedDate,
-        "status": 1,
-        "statusName": "",
-        "seller": _sellerController.text.isNotEmpty ? _sellerController.text : "Default Seller",
-        "receiver": _receiverController.text,
-        "supplierName": _supplierController.text,
-        "totalAmount": totalAmount,
-        "finalAmount": totalAmount,
-        "products": products,
-        "paymentMethods": paymentMethods
+        "rawCommandsData": rawCommandsData,
       });
 
       setState(() {
@@ -379,7 +461,18 @@ class _PrinterScreenState extends State<PrinterScreen> {
         receiptData["receiver"] = "Test Receiver";
       }
 
-      final bool result = await platform.invokeMethod('printCheque', receiptData);
+      // Format the cheque in Flutter
+      final rawCommandsData = ChequeFormatter.formatCheque(
+        chequeDetails: receiptData,
+        pageWidth: 32,
+        useAutoCut: true,
+        feedLineCount: 4,
+      );
+
+      // Pass the raw command data to Swift
+      final bool result = await platform.invokeMethod('printCheque', {
+        "rawCommandsData": rawCommandsData,
+      });
 
       setState(() {
         _status = result ? 'Test receipt printed successfully' : 'Failed to print test receipt';
@@ -393,11 +486,33 @@ class _PrinterScreenState extends State<PrinterScreen> {
     }
   }
 
+  // Add method to open the designer screen
+  Future<void> _openChequeDesigner() async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (context) => const ChequeDesignerPage()),
+    );
+
+    if (result != null) {
+      setState(() {
+        _templateData = result;
+        _status = 'Template saved. Ready to print.';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Bluetooth Printer Demo'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.design_services),
+            onPressed: _openChequeDesigner,
+            tooltip: 'Design Cheque Template',
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -461,6 +576,33 @@ class _PrinterScreenState extends State<PrinterScreen> {
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
+                  // Show template status if available
+                  if (_templateData != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16.0),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle, color: Colors.green),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Custom template loaded from Designer',
+                              style: TextStyle(color: Colors.green[800]),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _templateData = null;
+                              });
+                            },
+                            child: const Text('Clear'),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Existing buttons
                   Row(
                     children: [
                       Expanded(
@@ -494,6 +636,14 @@ class _PrinterScreenState extends State<PrinterScreen> {
                       child: Text(
                         _isPrinting ? 'Printing...' : 'Test Two Products',
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _openChequeDesigner,
+                      child: const Text('Design Custom Cheque'),
                     ),
                   ),
                 ],
