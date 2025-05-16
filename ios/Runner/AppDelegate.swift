@@ -505,7 +505,30 @@ import CoreBluetooth
             commands.append(contentsOf: [0x0A]) // Line feed
             commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-            // Products - with improved column layout and wrapping for product names
+            // Define column widths for products section
+            let nameColWidth = Int(Double(pageWidth) * 0.5) // 50% for name
+            let qtyColWidth = Int(Double(pageWidth) * 0.25) // 25% for quantity
+            let priceColWidth = pageWidth - nameColWidth - qtyColWidth // remaining space for price
+
+            // Add column headers for products
+            commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+            let nameHeader = "Mahsulot"
+            let qtyHeader = "Miqdori"
+            let priceHeader = "Narxi"
+
+            let paddedNameHeader = nameHeader + String(repeating: " ", count: max(0, nameColWidth - nameHeader.count))
+            let paddedQtyHeader = qtyHeader + String(repeating: " ", count: max(0, qtyColWidth - qtyHeader.count))
+
+            let headerLine = "\(paddedNameHeader)\(paddedQtyHeader)\(priceHeader)"
+            commands.append(contentsOf: headerLine.data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+            commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
+
+            // Another divider line
+            commands.append(contentsOf: String(repeating: "-", count: pageWidth).data(using: .utf8) ?? Data())
+            commands.append(contentsOf: [0x0A]) // Line feed
+
+            // Products - in 3-column layout
             for product in products {
                 let name = product["name"] as? String ?? "Unknown Product"
                 let quantity = product["quantity"] as? Double ?? 0.0
@@ -525,47 +548,40 @@ import CoreBluetooth
                 let maxNameLength = pageWidth - 2 // Leave some margin
                 let fullProductName = sanitizeText("\(name) \(statusLabel)")
 
-                // Product name (bold) - wrap if too long with 8-char limit and dash splitting
-                commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+                                                // Print products in 3 columns (name, quantity, price) - without bold formatting
 
-                // Wrap product name to fit reasonable width for better formatting
-                let wrappedProductName = wrapTextWithDash(fullProductName, maxLength: min(16, pageWidth - 10))
+                // Wrap product name to fit in first column
+                let wrappedProductName = wrapTextWithDash(fullProductName, maxLength: nameColWidth - 1)
 
-                // Print product name with quantity and price on the right - properly aligned
+                // First line with all three columns
                 if !wrappedProductName.isEmpty {
-                    // First line: Product name with quantity and price aligned to the right
                     let firstLine = wrappedProductName[0]
-
-                    // Calculate needed padding to position price at far right
-                    // Make sure there's enough space for the price
-                    let truncatedFirstLine = firstLine.count > pageWidth - priceText.count - 3
-                        ? String(firstLine.prefix(pageWidth - priceText.count - 3))
+                    // Ensure name doesn't overflow its column
+                    let displayName = firstLine.count > nameColWidth - 1
+                        ? String(firstLine.prefix(nameColWidth - 1))
                         : firstLine
 
-                    let rightSidePadding = max(1, pageWidth - truncatedFirstLine.count - priceText.count - 1)
-                    let firstLineWithPrice = "\(truncatedFirstLine)\(String(repeating: " ", count: rightSidePadding))\(priceText)"
-                    commands.append(contentsOf: firstLineWithPrice.data(using: .utf8) ?? Data())
+                    // Create padded columns
+                    let paddedName = displayName + String(repeating: " ", count: max(0, nameColWidth - displayName.count))
+                    let paddedQty = quantityText + String(repeating: " ", count: max(0, qtyColWidth - quantityText.count))
+
+                    // Combine all columns
+                    let fullLine = "\(paddedName)\(paddedQty)\(priceText)"
+                    commands.append(contentsOf: fullLine.data(using: .utf8) ?? Data())
                     commands.append(contentsOf: [0x0A]) // Line feed
 
-                    // Second line: Quantity information (if any product name lines remain)
+                    // Print remaining lines of product name if any
                     if wrappedProductName.count > 1 {
-                        // Print quantity info on its own line
-                        commands.append(contentsOf: quantityText.data(using: .utf8) ?? Data())
-                        commands.append(contentsOf: [0x0A]) // Line feed
-
-                        // Print remaining lines of product name
                         for i in 1..<wrappedProductName.count {
-                            commands.append(contentsOf: wrappedProductName[i].data(using: .utf8) ?? Data())
+                            let line = wrappedProductName[i]
+                            let displayLine = line.count > nameColWidth - 1
+                                ? String(line.prefix(nameColWidth - 1))
+                                : line
+                            commands.append(contentsOf: displayLine.data(using: .utf8) ?? Data())
                             commands.append(contentsOf: [0x0A]) // Line feed
                         }
-                    } else {
-                        // If no more product name lines, print quantity on its own line
-                        commands.append(contentsOf: quantityText.data(using: .utf8) ?? Data())
-                        commands.append(contentsOf: [0x0A]) // Line feed
                     }
                 }
-
-                commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
                 // Add space between products
                 commands.append(contentsOf: [0x0A]) // Empty line after each product
