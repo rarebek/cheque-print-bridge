@@ -256,9 +256,9 @@ class ChequeFormatter {
       final statusLabel = productStatus == 1 ? '' : '(Qaytarilgan)';
       final total = price * quantity;
 
-      // Format price to show commas for thousands with correct Uzbek character
+      // Format price to show commas for thousands
       final formattedPrice = _formatNumber(total);
-      final priceText = '$formattedPrice soʻm';
+      final priceText = '$formattedPrice so\'m';
       final quantityText = '($quantity $unitName)';
 
       // Include quantity and unit after product name with a newline
@@ -379,7 +379,7 @@ class ChequeFormatter {
     commands.add(0x0A); // Line feed
     commands.addAll([0x1B, 0x45, 0x00]); // Bold off
 
-    // Thank you message with the same format as company name
+    // Thank you message centered and bold
     if (!isPurchaseReceipt) {
       commands.addAll([0x1B, 0x61, 0x01]); // Center align
       commands.addAll([0x1B, 0x45, 0x01]); // Bold on
@@ -474,10 +474,7 @@ class ChequeFormatter {
   }
 
   static String _sanitizeText(String text) {
-    // Replace problematic characters with better alternatives except for soʻm
-    if (text.contains("soʻm")) {
-      return text; // Don't modify the special character in soʻm
-    }
+    // Replace problematic characters with better alternatives
     return text.replaceAll('ʻ', '\'')
                .replaceAll('ʼ', '\'')
                .replaceAll('Oʻ', 'O\'')
