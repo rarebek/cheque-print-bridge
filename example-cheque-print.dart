@@ -392,77 +392,126 @@ Future<void> printPurchaseInfo(PurchaseTransaction transaction)async{
 }
 
 Future<void> testPrinting() async {
-  // Create test data for sale receipt
-  final saleTransaction = SaleHistoryTransaction(
-    transactionId: "123456",
-    companyName: "TEST COMPANY NAME",
-    createdAt: DateTime.now().toIso8601String(),
-    seller: "Test Seller",
-    status: 1,
-    statusName: "",
-    finalAmount: 45000,
-    products: [
-      // Product with special character ʻ to test encoding
-      SaleProduct(
-        name: "Product with ʻ special char",
-        quantity: 2,
-        unitName: "dona",
-        currentPrice: 10000,
-        status: 1
+  // Setup test data
+  List<dynamic> products = [];
+  double totalAmount = 0;
+
+  // Add first product
+  final product1Name = "Product with ʻ special char";
+  final product1Quantity = 2.0;
+  final product1UnitName = "dona";
+  final product1Price = 10000.0;
+
+  products.add({
+    "name": product1Name,
+    "quantity": product1Quantity,
+    "unitName": product1UnitName,
+    "currentPrice": product1Price,
+    "status": 1,
+  });
+
+  totalAmount += product1Quantity * product1Price;
+
+  // Add second product
+  final product2Name = "This is a long product name that should wrap";
+  final product2Quantity = 1.0;
+  final product2UnitName = "kg";
+  final product2Price = 25000.0;
+
+  products.add({
+    "name": product2Name,
+    "quantity": product2Quantity,
+    "unitName": product2UnitName,
+    "currentPrice": product2Price,
+    "status": 1,
+  });
+
+  totalAmount += product2Quantity * product2Price;
+
+  // Prompt for transaction type (you should implement a UI dialog for this)
+  print("Please choose transaction type: 1 for Sale, 2 for Purchase");
+  // This would normally come from user input - hardcoded here for testing
+  int transactionType = 1; // 1 for Sale, 2 for Purchase
+
+  if (transactionType == 1) {
+    // Create sale transaction
+    final saleTransaction = SaleHistoryTransaction(
+      transactionId: "S${DateTime.now().millisecondsSinceEpoch}",
+      companyName: "TEST COMPANY",
+      createdAt: DateTime.now().toIso8601String(),
+      seller: "Test Seller",
+      status: 1,
+      statusName: "",
+      finalAmount: totalAmount,
+      products: products.map((p) => SaleProduct(
+        name: p["name"],
+        quantity: p["quantity"],
+        unitName: p["unitName"],
+        currentPrice: p["currentPrice"],
+        status: p["status"],
+      )).toList(),
+      paymentMethods: [
+        PaymentMethod(methodId: 1, amount: totalAmount/2),
+        PaymentMethod(methodId: 2, amount: totalAmount/2),
+      ],
+    );
+
+    print("Printing sale receipt...");
+    await printSaleReceipt58mm(saleTransaction: saleTransaction);
+  } else {
+    // Create purchase transaction
+    final purchaseTransaction = PurchaseTransaction(
+      transactionId: "P${DateTime.now().millisecondsSinceEpoch}",
+      companyName: "TEST COMPANY",
+      createdAt: DateTime.now().toIso8601String(),
+      supplier: Supplier(name: "Test Supplier"),
+      receiver: Receiver(name: "Test Receiver"),
+      status: 1,
+      statusName: "",
+      totalAmount: totalAmount,
+      products: products.map((p) => PurchaseProduct(
+        name: p["name"],
+        quantity: p["quantity"],
+        unitName: p["unitName"],
+        currentPrice: p["currentPrice"],
+        status: p["status"],
+      )).toList(),
+    );
+
+    print("Printing purchase receipt...");
+    await printSaleReceipt58mm(purchaseTransaction: purchaseTransaction);
+  }
+}
+
+// For a real UI implementation, you could have a function like this:
+// This would be called from a button press in your Flutter UI
+Future<void> printReceiptWithUI(BuildContext context) async {
+  // Get product data from UI forms or state management
+
+  // Show dialog to select transaction type
+  final transactionType = await showDialog<int>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Select Receipt Type'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, 1),
+            child: Text('Sales Receipt'),
+          ),
+          SizedBox(height: 10),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, 2),
+            child: Text('Purchase Receipt'),
+          ),
+        ],
       ),
-      // Product with long name to test wrapping
-      SaleProduct(
-        name: "This is a very long product name that should be wrapped to multiple lines on the receipt",
-        quantity: 1,
-        unitName: "kg",
-        currentPrice: 25000,
-        status: 1
-      ),
-    ],
-    paymentMethods: [
-      PaymentMethod(methodId: 1, amount: 25000),
-      PaymentMethod(methodId: 2, amount: 20000),
-    ],
+    ),
   );
 
-  // Create test data for purchase receipt
-  final purchaseTransaction = PurchaseTransaction(
-    transactionId: "P123456",
-    companyName: "TEST COMPANY NAME",
-    createdAt: DateTime.now().toIso8601String(),
-    supplier: Supplier(name: "Test Supplier"),
-    receiver: Receiver(name: "Test Receiver"),
-    status: 1,
-    statusName: "",
-    totalAmount: 45000,
-    products: [
-      // Product with special character ʻ to test encoding
-      PurchaseProduct(
-        name: "Purchase item with ʻ special char",
-        quantity: 2,
-        unitName: "dona",
-        currentPrice: 10000,
-        status: 1
-      ),
-      // Product with long name to test wrapping
-      PurchaseProduct(
-        name: "This is a very long product name that should be wrapped to multiple lines on the receipt for purchase",
-        quantity: 1,
-        unitName: "kg",
-        currentPrice: 25000,
-        status: 1
-      ),
-    ],
-  );
+  if (transactionType == null) return; // User cancelled
 
-  // Test sale receipt
-  print("Printing sale receipt...");
-  await printSaleReceipt58mm(saleTransaction: saleTransaction);
-
-  // Wait a bit between prints
-  await Future.delayed(const Duration(seconds: 3));
-
-  // Test purchase receipt
-  print("Printing purchase receipt...");
-  await printSaleReceipt58mm(purchaseTransaction: purchaseTransaction);
+  // Call the existing function with the selected type
+  await testPrinting();
 }

@@ -350,9 +350,9 @@ import CoreBluetooth
             // Determine receipt type - purchase or sale based on if we have supplier data
             let isPurchaseReceipt = !supplierName.isEmpty
 
-            // Center the company name - truly centered with larger font
-            commands.append(contentsOf: [0x1D, 0x21, 0x11]) // GS ! 17 - Double height and width
-            let companyPadding = (pageWidth/2 - companyName.count) / 2
+            // Center the company name - truly centered with slightly larger font
+            commands.append(contentsOf: [0x1D, 0x21, 0x01]) // GS ! 01 - only slightly larger font (height doubled)
+            let companyPadding = (pageWidth - companyName.count) / 2
             let centeredCompany = String(repeating: " ", count: max(0, companyPadding)) + sanitizeText(companyName)
             commands.append(contentsOf: centeredCompany.data(using: .utf8) ?? Data())
             commands.append(contentsOf: [0x0A]) // Line feed
@@ -507,24 +507,31 @@ import CoreBluetooth
                 // Wrap product name to fit the width
                 let wrappedProductName = wrapText(fullProductName, maxLength: maxNameLength)
 
-                for line in wrappedProductName {
-                    commands.append(contentsOf: line.data(using: .utf8) ?? Data())
+                // First line should include product name and price
+                if let firstLine = wrappedProductName.first {
+                    // Format first line with name and price
+                    let namePadding = max(1, pageWidth - firstLine.count - priceText.count)
+                    let firstLineWithPrice = "\(firstLine)\(String(repeating: " ", count: namePadding))\(priceText)"
+                    commands.append(contentsOf: firstLineWithPrice.data(using: .utf8) ?? Data())
                     commands.append(contentsOf: [0x0A]) // Line feed
+
+                    // Print remaining wrapped name lines (if any)
+                    if wrappedProductName.count > 1 {
+                        for i in 1..<wrappedProductName.count {
+                            commands.append(contentsOf: wrappedProductName[i].data(using: .utf8) ?? Data())
+                            commands.append(contentsOf: [0x0A]) // Line feed
+                        }
+                    }
                 }
+
                 commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-                // For quantity and price, use a 2-column layout
-                let quantityWidth = quantityText.count
-                let priceWidth = priceText.count
-                let spaceBetween = max(1, pageWidth - quantityWidth - priceWidth)
-
-                // Ensure there's enough space for both columns
-                let quantityColumn = quantityText
-                let priceColumn = priceText
-                let layoutLine = "\(quantityColumn)\(String(repeating: " ", count: spaceBetween))\(priceColumn)"
-
-                commands.append(contentsOf: layoutLine.data(using: .utf8) ?? Data())
+                // Print quantity on a new line with indent
+                let quantityIndent = "  "
+                commands.append(contentsOf: "\(quantityIndent)\(quantityText)".data(using: .utf8) ?? Data())
                 commands.append(contentsOf: [0x0A]) // Line feed
+
+                // Add space between products
                 commands.append(contentsOf: [0x0A]) // Empty line after each product
             }
 
