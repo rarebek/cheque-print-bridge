@@ -263,25 +263,23 @@ import CoreBluetooth
         // Set text alignment center (ESC a 1)
         commands.append(contentsOf: [0x1B, 0x61, 0x01])
 
-        // Company name (bold)
-        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
+        // Company name (centered, not bold)
         commands.append(contentsOf: companyName.data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
         // Set text alignment left (ESC a 0)
         commands.append(contentsOf: [0x1B, 0x61, 0x00])
 
         // Date and time (left and right aligned)
-        let dateText = "Sana: \(formattedDate)"
-        let timeText = "Vaqti: \(formattedTime)"
+        let dateText = "Sana:\(formattedDate)"
+        let timeText = "Vaqti:\(formattedTime)"
         let spacePadding = String(repeating: " ", count: max(1, pageWidth - dateText.count - timeText.count))
         commands.append(contentsOf: "\(dateText)\(spacePadding)\(timeText)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
 
         // Transaction ID with right alignment
-        let transactionIdLabel = "Chek raqami"
-        let transactionIdValue = "№\(transactionId)"
+        let transactionIdLabel = "Chek raqami: "
+        let transactionIdValue = "\(transactionId)" // Removed № symbol
         let transIdPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - transactionIdValue.count))
         commands.append(contentsOf: "\(transactionIdLabel)\(transIdPadding)\(transactionIdValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
@@ -320,7 +318,7 @@ import CoreBluetooth
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Products
+        // Products - 3 column layout
         for product in products {
             let name = product["name"] as? String ?? "Unknown Product"
             let quantity = product["quantity"] as? Double ?? 0.0
@@ -361,12 +359,35 @@ import CoreBluetooth
 
             commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-            // Quantity and unit on left, price on right
+            // Three column layout: Product details | Quantity | Price
             let quantityText = "(\(quantity) \(unitName))"
             let priceText = "\(formattedPrice) so'm"
-            let pricePadding = String(repeating: " ", count: max(1, pageWidth - quantityText.count - priceText.count))
-            commands.append(contentsOf: "\(quantityText)\(pricePadding)\(priceText)".data(using: .utf8) ?? Data())
-            commands.append(contentsOf: [0x0A]) // Line feed
+
+            // Calculate column widths (adjust these based on your needs)
+            let col1Width = min(12, name.count) // Product name truncated if needed
+            let col2Width = quantityText.count  // Quantity and unit
+            let col3Width = priceText.count     // Price
+
+            // Ensure we have enough space, minimum 1 space between columns
+            let totalColWidth = col1Width + col2Width + col3Width + 2
+            if totalColWidth <= pageWidth {
+                // Create column spacing
+                let spaceCol1 = String(repeating: " ", count: (pageWidth - col3Width - col2Width) / 2 - col1Width + 1)
+                let spaceCol2 = String(repeating: " ", count: (pageWidth - col3Width - col2Width) / 2 + 1)
+
+                // Format as: Name   (Quantity unit)   Price
+                commands.append(contentsOf: "\(quantityText)\(spaceCol2)\(priceText)".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+            } else {
+                // Fallback for narrow paper: just print quantity and price on separate lines
+                commands.append(contentsOf: quantityText.data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+
+                // Right align price
+                let pricePadding = String(repeating: " ", count: max(1, pageWidth - priceText.count))
+                commands.append(contentsOf: "\(pricePadding)\(priceText)".data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+            }
         }
 
         // Horizontal line
@@ -378,12 +399,14 @@ import CoreBluetooth
         // Format total amount
         let formattedTotal = formatter.string(from: NSNumber(value: finalAmount)) ?? "\(finalAmount)"
 
-        // Total amount with proper alignment
+        // Total amount with proper alignment - in BOLD
+        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
         let totalLabel = "Umumiy summa"
         let totalValue = "\(formattedTotal) so'm"
         let totalPadding = String(repeating: " ", count: max(1, pageWidth - totalLabel.count - totalValue.count))
         commands.append(contentsOf: "\(totalLabel)\(totalPadding)\(totalValue)".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
+        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
         // Tax (15%)
         let tax = finalAmount * 0.15
@@ -434,12 +457,10 @@ import CoreBluetooth
         commands.append(contentsOf: [0x0A]) // Line feed
         commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-        // Thank you message - center aligned
+        // Thank you message - center aligned (not bold)
         commands.append(contentsOf: [0x1B, 0x61, 0x01]) // Center align
-        commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
         commands.append(contentsOf: "Xaridingiz uchun rahmat!".data(using: .utf8) ?? Data())
         commands.append(contentsOf: [0x0A]) // Line feed
-        commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
         // Feed and cut
         commands.append(contentsOf: [0x0A, 0x0A, 0x0A, 0x0A]) // Feed lines
