@@ -358,8 +358,8 @@ import CoreBluetooth
             commands.append(contentsOf: [0x0A]) // Line feed
             commands.append(contentsOf: [0x1D, 0x21, 0x00]) // Reset font size
 
-            // Helper function to wrap strings that are too long
-            func wrapText(_ string: String, maxLength: Int) -> [String] {
+            // Helper function to wrap text with 8-character limit and dash-based word splitting
+            func wrapTextWithDash(_ string: String, maxLength: Int = 8) -> [String] {
                 var result: [String] = []
                 var currentLine = ""
 
@@ -367,31 +367,48 @@ import CoreBluetooth
                 let words = string.split(separator: " ")
 
                 for word in words {
-                    // If this word would make the line too long, start a new line
-                    if currentLine.count + word.count + 1 > maxLength {
+                    let wordStr = String(word)
+
+                    // If word is longer than maxLength, split with dashes
+                    if wordStr.count > maxLength {
                         if !currentLine.isEmpty {
+                            // Add current line to result and process long word separately
                             result.append(currentLine)
-                            currentLine = String(word)
-                        } else {
-                            // Word itself is longer than maxLength, need to split it
-                            var remainingWord = String(word)
-                            while remainingWord.count > maxLength {
-                                let index = remainingWord.index(remainingWord.startIndex, offsetBy: maxLength)
-                                result.append(String(remainingWord[..<index]))
-                                remainingWord = String(remainingWord[index...])
-                            }
+                            currentLine = ""
+                        }
+
+                        // Split long word with dashes
+                        var remainingWord = wordStr
+                        while remainingWord.count > maxLength {
+                            let index = remainingWord.index(remainingWord.startIndex, offsetBy: maxLength - 1)
+                            let lineWithDash = String(remainingWord[...index]) + "-"
+                            result.append(lineWithDash)
+
+                            // Move to next part of the word
+                            remainingWord = String(remainingWord[remainingWord.index(after: index)...])
+                        }
+
+                        // Add any remaining part of the word
+                        if !remainingWord.isEmpty {
                             currentLine = remainingWord
                         }
-                    } else {
-                        // Add space before word if not at beginning of line
+                    }
+                    // If adding this word exceeds maxLength
+                    else if currentLine.count + wordStr.count + (currentLine.isEmpty ? 0 : 1) > maxLength {
+                        // Add current line to result and start new line with current word
+                        result.append(currentLine)
+                        currentLine = wordStr
+                    }
+                    else {
+                        // Add space if not at beginning of line
                         if !currentLine.isEmpty {
                             currentLine += " "
                         }
-                        currentLine += String(word)
+                        currentLine += wordStr
                     }
                 }
 
-                // Don't forget the last line
+                // Add the last line if not empty
                 if !currentLine.isEmpty {
                     result.append(currentLine)
                 }
@@ -405,7 +422,7 @@ import CoreBluetooth
                 let maxValueWidth = pageWidth - maxLabelWidth - 1
 
                 // Wrap the value if needed
-                let wrappedValues = wrapText(sanitizeText(value), maxLength: maxValueWidth)
+                let wrappedValues = wrapTextWithDash(sanitizeText(value), maxLength: maxValueWidth)
 
                 // First line includes the label
                 if let firstLine = wrappedValues.first {
@@ -434,7 +451,7 @@ import CoreBluetooth
 
             // Transaction ID with right alignment - wrapped if needed
             let transactionIdLabel = "Chek raqami: "
-            let wrappedIds = wrapText(sanitizeText(transactionId), maxLength: pageWidth - transactionIdLabel.count - 1)
+            let wrappedIds = wrapTextWithDash(sanitizeText(transactionId), maxLength: pageWidth - transactionIdLabel.count - 1)
 
             if let firstLine = wrappedIds.first {
                 let idPadding = String(repeating: " ", count: max(1, pageWidth - transactionIdLabel.count - firstLine.count))
@@ -501,35 +518,34 @@ import CoreBluetooth
                 let maxNameLength = pageWidth - 2 // Leave some margin
                 let fullProductName = sanitizeText("\(name) \(statusLabel)")
 
-                // Product name (bold) - wrap if too long
+                // Product name (bold) - wrap if too long with 8-char limit and dash splitting
                 commands.append(contentsOf: [0x1B, 0x45, 0x01]) // Bold on
 
-                // Wrap product name to fit the width
-                let wrappedProductName = wrapText(fullProductName, maxLength: maxNameLength)
+                // Wrap product name to fit the width with our custom wrapping
+                let wrappedProductName = wrapTextWithDash(fullProductName)
 
-                // First line should include product name and price
-                if let firstLine = wrappedProductName.first {
-                    // Format first line with name and price
-                    let namePadding = max(1, pageWidth - firstLine.count - priceText.count)
-                    let firstLineWithPrice = "\(firstLine)\(String(repeating: " ", count: namePadding))\(priceText)"
-                    commands.append(contentsOf: firstLineWithPrice.data(using: .utf8) ?? Data())
+                // Print each line of the product name
+                for line in wrappedProductName {
+                    commands.append(contentsOf: line.data(using: .utf8) ?? Data())
                     commands.append(contentsOf: [0x0A]) // Line feed
-
-                    // Print remaining wrapped name lines (if any)
-                    if wrappedProductName.count > 1 {
-                        for i in 1..<wrappedProductName.count {
-                            commands.append(contentsOf: wrappedProductName[i].data(using: .utf8) ?? Data())
-                            commands.append(contentsOf: [0x0A]) // Line feed
-                        }
-                    }
                 }
 
                 commands.append(contentsOf: [0x1B, 0x45, 0x00]) // Bold off
 
-                // Print quantity on a new line with indent
-                let quantityIndent = "  "
-                commands.append(contentsOf: "\(quantityIndent)\(quantityText)".data(using: .utf8) ?? Data())
+                // Always print quantity and price on separate lines
+
+                // Print quantity centered in its own line
+                commands.append(contentsOf: [0x1B, 0x61, 0x01]) // ESC a 1 - Center alignment
+                commands.append(contentsOf: quantityText.data(using: .utf8) ?? Data())
                 commands.append(contentsOf: [0x0A]) // Line feed
+
+                // Print price right-aligned
+                commands.append(contentsOf: [0x1B, 0x61, 0x02]) // ESC a 2 - Right alignment
+                commands.append(contentsOf: priceText.data(using: .utf8) ?? Data())
+                commands.append(contentsOf: [0x0A]) // Line feed
+
+                // Reset alignment to left
+                commands.append(contentsOf: [0x1B, 0x61, 0x00]) // ESC a 0 - Left alignment
 
                 // Add space between products
                 commands.append(contentsOf: [0x0A]) // Empty line after each product
